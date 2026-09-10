@@ -118,7 +118,7 @@ Panel {
         guiInstalled: cryptomator.guiInstalled, isBundled: cryptomator.isBundled,
         cliPath: cryptomator.cliPath, running: cryptomator.running,
         totalVaults: cryptomator.totalVaults, unlockedCount: cryptomator.unlockedCount,
-        vaultsCount: cryptomator.vaults.length, lastError: cryptomator.lastError
+        vaultsCount: cryptomator.totalVaults, lastError: cryptomator.lastError
       })
     }
     function dumpVaults(): string { return JSON.stringify(cryptomator.vaults) }
@@ -269,8 +269,8 @@ Panel {
               width: parent.width
 
               PanelSectionHeader {
-                text: cryptomator.vaults.length > 0
-                  ? "VAULTS (" + cryptomator.vaults.length + ")"
+                text: cryptomator.totalVaults > 0
+                  ? "VAULTS (" + cryptomator.totalVaults + ")"
                   : "VAULTS"
                 Layout.alignment: Qt.AlignVCenter
               }
@@ -278,7 +278,7 @@ Panel {
 
               Row {
                 spacing: Style.space(4)
-                visible: !root.formActive && cryptomator.vaults.length > 0
+                visible: !root.formActive && cryptomator.totalVaults > 0
 
                 Button {
                   text: "Add Existing"; iconText: "󰙅"; bordered: true
@@ -514,7 +514,7 @@ Panel {
 
             // ─── EMPTY STATE (no vaults, no form open) ─────────────────────
             Item {
-              visible: cryptomator.vaults.length === 0 && !root.formActive
+              visible: cryptomator.totalVaults === 0 && !root.formActive
               width: parent.width
               implicitHeight: emptyCard.implicitHeight
 
