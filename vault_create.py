@@ -12,6 +12,7 @@ Cryptomator vault format v8:
 """
 
 import ctypes
+import ctypes.util
 import hashlib
 import json
 import os
@@ -23,7 +24,14 @@ from pathlib import Path
 # Low-level AES primitives via libcrypto
 # ---------------------------------------------------------------------------
 
-_libcrypto = ctypes.CDLL("libcrypto.so.3")
+_lib_candidate = ctypes.util.find_library("crypto") or "libcrypto.so.3"
+try:
+    _libcrypto = ctypes.CDLL(_lib_candidate)
+except OSError:
+    try:
+        _libcrypto = ctypes.CDLL("libcrypto.so.3")
+    except OSError:
+        _libcrypto = ctypes.CDLL("libcrypto.so")
 
 class _AES_KEY(ctypes.Structure):
     _fields_ = [("rd_key", ctypes.c_uint32 * 60), ("rounds", ctypes.c_int)]
@@ -167,6 +175,13 @@ def _derive_kek(password: str, salt: bytes, cost: int = 16384) -> bytes:
     )
 
 
+def _write_file_secure(file_path: Path, content: str):
+    """Write sensitive vault config with restrictive 0600 permissions."""
+    fd = os.open(file_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    with open(fd, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
 def create_vault(vault_path: str, password: str) -> dict:
     """
     Create a new Cryptomator v8 vault at vault_path with the given password.
@@ -179,7 +194,7 @@ def create_vault(vault_path: str, password: str) -> dict:
     if path.exists() and any(path.iterdir()):
         return {'ok': False, 'error': f"Directory is not empty: {path}"}
 
-    path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     try:
         # 1. Generate 256-bit master key (encryption key + MAC key = 512 bits total)
@@ -242,17 +257,15 @@ def create_vault(vault_path: str, password: str) -> dict:
         sig = _hmac2.new(master_mac_key, signing_input, hashlib.sha256).digest()
         jwt_token = f"{header_b64}.{payload_b64}.{_b64url(sig)}"
 
-        # 7. Create directory structure
+        # 7. Create directory structure with restrictive permissions
         d_dir = path / "d"
-        d_dir.mkdir(exist_ok=True)
+        d_dir.mkdir(mode=0o700, exist_ok=True)
 
-        # 8. Write masterkey.cryptomator
-        (path / "masterkey.cryptomator").write_text(
-            json.dumps(masterkey, indent=2), encoding='utf-8'
-        )
+        # 8. Write masterkey.cryptomator with 0600 permissions
+        _write_file_secure(path / "masterkey.cryptomator", json.dumps(masterkey, indent=2))
 
-        # 9. Write vault.cryptomator (the JWT token)
-        (path / "vault.cryptomator").write_text(jwt_token, encoding='utf-8')
+        # 9. Write vault.cryptomator (the JWT token) with 0600 permissions
+        _write_file_secure(path / "vault.cryptomator", jwt_token)
 
         return {'ok': True}
 

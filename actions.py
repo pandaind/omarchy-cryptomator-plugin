@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Cryptomator action runner for Omarchy shell with bundled cryptomator-cli support."""
 
+import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 import zipfile
@@ -68,7 +71,8 @@ def cleanup_cli_for_mount(mount_point):
     if not mount_point:
         return
     try:
-        res = subprocess.run(["pgrep", "-f", f"--mountPoint={mount_point}"], capture_output=True, text=True, check=False)
+        escaped_mount = re.escape(str(mount_point))
+        res = subprocess.run(["pgrep", "-f", f"--mountPoint={escaped_mount}"], capture_output=True, text=True, check=False)
         if res.returncode == 0:
             for pid_str in res.stdout.split():
                 try:
@@ -148,11 +152,15 @@ def unlock_with_password(vault_path, mount_point, password):
         return True
 
     log_dir = Path.home() / ".local" / "state" / "cryptomator"
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-.]', '_', Path(vault_path).name) or "vault"
     try:
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / f"{Path(vault_path).name}.log"
+        log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        log_path = log_dir / f"{safe_name}.log"
+        log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
     except OSError:
-        log_path = Path("/tmp") / f"cryptomator-{Path(vault_path).name}.log"
+        tmp_handle = tempfile.NamedTemporaryFile(prefix=f"cryptomator-{safe_name}-", suffix=".log", delete=False)
+        log_path = Path(tmp_handle.name)
+        log_fd = tmp_handle.fileno()
 
     cmd = [
         cli,
@@ -164,7 +172,7 @@ def unlock_with_password(vault_path, mount_point, password):
     ]
 
     try:
-        with open(log_path, "w", encoding="utf-8") as log_f:
+        with open(log_fd, "w", encoding="utf-8", closefd=True) as log_f:
             proc = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
@@ -232,6 +240,11 @@ def setup_bundle():
         print(f"Unsupported architecture: {machine}", file=sys.stderr)
         return False
 
+    OFFICIAL_SHA256 = {
+        "x64": "6c2ac174f94a2ff30fdfa00ac43669703f1bca1fa633a762dc336bf9d794b1cb",
+        "aarch64": "bd8d0dc62a707d7b378027772e16298333cfbe8e17ec235188f9bb50521dbb66",
+    }
+
     version = "0.6.2"
     url = f"https://github.com/cryptomator/cli/releases/download/{version}/cryptomator-cli-{version}-linux-{arch}.zip"
 
@@ -249,12 +262,37 @@ def setup_bundle():
         print(f"Download failed: {e}", file=sys.stderr)
         return False
 
-    print("Extracting bundle...")
+    print("Verifying binary checksum...")
+    hasher = hashlib.sha256()
+    try:
+        with open(zip_path, "rb") as f:
+            while chunk := f.read(65536):
+                hasher.update(chunk)
+        computed_sha = hasher.hexdigest()
+        expected_sha = OFFICIAL_SHA256.get(arch)
+        if computed_sha != expected_sha:
+            print(f"Security error: Checksum mismatch for downloaded archive!", file=sys.stderr)
+            print(f"Expected: {expected_sha}", file=sys.stderr)
+            print(f"Got:      {computed_sha}", file=sys.stderr)
+            zip_path.unlink(missing_ok=True)
+            return False
+    except Exception as e:
+        print(f"Checksum verification failed: {e}", file=sys.stderr)
+        zip_path.unlink(missing_ok=True)
+        return False
+
+    print("Extracting bundle safely...")
     try:
         if target_dir.exists():
             shutil.rmtree(target_dir)
 
+        resolved_vendor = vendor_dir.resolve()
         with zipfile.ZipFile(zip_path, "r") as zf:
+            # Zip Slip prevention: check destination for all members
+            for member in zf.infolist():
+                dest = (vendor_dir / member.filename).resolve()
+                if not (dest == resolved_vendor or str(dest).startswith(str(resolved_vendor) + "/")):
+                    raise SecurityError(f"Potential Zip Slip path traversal detected: {member.filename}")
             zf.extractall(vendor_dir)
         zip_path.unlink(missing_ok=True)
 
@@ -265,11 +303,26 @@ def setup_bundle():
         if launcher.exists():
             launcher.chmod(launcher.stat().st_mode | 0o755)
 
-        print(f"Successfully installed bundled cryptomator-cli to {target_dir}")
+        print(f"Successfully installed verified cryptomator-cli to {target_dir}")
         return True
     except Exception as e:
         print(f"Extraction failed: {e}", file=sys.stderr)
+        zip_path.unlink(missing_ok=True)
         return False
+
+
+def _write_json_secure(path: Path, data):
+    """Atomically write JSON data with restrictive 0600 permissions."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temp_path = path.with_suffix(f".tmp.{os.getpid()}")
+    try:
+        fd = os.open(temp_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+        with open(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        temp_path.replace(path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def get_vaults_file():
@@ -278,7 +331,7 @@ def get_vaults_file():
     """
     data_dir = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
     storage_dir = Path(data_dir) / "pandac.cryptomator"
-    storage_dir.mkdir(parents=True, exist_ok=True)
+    storage_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     target_file = storage_dir / "vaults.json"
 
     if not target_file.exists():
@@ -332,8 +385,7 @@ def add_vault(vault_path, display_name=None):
         "readOnly": False,
     })
 
-    with open(vaults_file, "w", encoding="utf-8") as f:
-        json.dump(vaults, f, indent=2)
+    _write_json_secure(vaults_file, vaults)
 
     print(f"Added vault '{name}' ({path_obj})")
     return True
@@ -357,8 +409,7 @@ def remove_vault(vault_path):
             if isinstance(vaults, list):
                 new_vaults = [v for v in vaults if Path(v.get("path", "")).expanduser().resolve() != path_obj]
                 if len(new_vaults) < len(vaults):
-                    with open(vaults_file, "w", encoding="utf-8") as f:
-                        json.dump(new_vaults, f, indent=2)
+                    _write_json_secure(vaults_file, new_vaults)
                     removed_any = True
         except Exception as e:
             print(f"Warning: could not update vaults.json: {e}", file=sys.stderr)

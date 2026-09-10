@@ -113,7 +113,7 @@ def get_vaults_file():
     """
     data_dir = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
     storage_dir = Path(data_dir) / "pandac.cryptomator"
-    storage_dir.mkdir(parents=True, exist_ok=True)
+    storage_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     target_file = storage_dir / "vaults.json"
 
     if not target_file.exists():
