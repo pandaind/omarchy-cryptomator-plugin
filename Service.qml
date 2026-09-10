@@ -98,7 +98,19 @@ Item {
     delayedRefresh.restart()
   }
 
-  function lockVault(mountPoint) {
+  function lockVault(mountPoint, vaultPath) {
+    var updated = []
+    var newUnlockedCount = 0
+    for (var i = 0; i < root.vaults.length; i++) {
+      var v = Object.assign({}, root.vaults[i])
+      if ((mountPoint && v.mountPoint === mountPoint) || (vaultPath && v.path === vaultPath)) {
+        v.isMounted = false
+      }
+      if (v.isMounted) newUnlockedCount++
+      updated.push(v)
+    }
+    root.vaults = updated
+    root.unlockedCount = newUnlockedCount
     runAction("lock", mountPoint)
   }
 
@@ -119,6 +131,14 @@ Item {
   }
 
   function lockAll() {
+    var updated = []
+    for (var i = 0; i < root.vaults.length; i++) {
+      var v = Object.assign({}, root.vaults[i])
+      v.isMounted = false
+      updated.push(v)
+    }
+    root.vaults = updated
+    root.unlockedCount = 0
     runAction("lock-all")
   }
 
@@ -242,9 +262,21 @@ Item {
         root.lastUnlockError = msg
       } else {
         root.lastUnlockError = ""
+        var updated = []
+        var newUnlockedCount = 0
+        for (var i = 0; i < root.vaults.length; i++) {
+          var v = Object.assign({}, root.vaults[i])
+          if (v.path === vPath) {
+            v.isMounted = true
+          }
+          if (v.isMounted) newUnlockedCount++
+          updated.push(v)
+        }
+        root.vaults = updated
+        root.unlockedCount = newUnlockedCount
+        root.refresh()
       }
 
-      root.delayedRefresh.restart()
       root.unlockFinished(vPath, success, msg)
       root.unlockingVaultPath = ""
     }

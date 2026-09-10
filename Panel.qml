@@ -543,12 +543,26 @@ Panel {
                   implicitHeight: cardCol.implicitHeight + Style.space(20)
                   radius: Style.cornerRadius
                   color: vaultItem.modelData.isMounted
-                    ? Style.selectedFillFor(root.foreground, Color.accent)
+                    ? (vaultCard.recentlyUnlocked
+                        ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.28)
+                        : Style.selectedFillFor(root.foreground, Color.accent))
                     : Style.hoverFillFor(root.foreground, Color.accent)
+
+                  Behavior on color {
+                    ColorAnimation { duration: 250 }
+                  }
 
                   readonly property bool isPrompting: root.activePasswordVault === vaultItem.modelData.path
                   readonly property bool isUnlocking: cryptomator.unlocking && cryptomator.unlockingVaultPath === vaultItem.modelData.path
                   property string unlockError: ""
+                  property bool recentlyUnlocked: false
+
+                  Timer {
+                    id: unlockPulseTimer
+                    interval: 1500
+                    repeat: false
+                    onTriggered: vaultCard.recentlyUnlocked = false
+                  }
 
                   Connections {
                     target: cryptomator
@@ -556,6 +570,8 @@ Panel {
                       if (vaultPath !== vaultItem.modelData.path) return
                       if (ok) {
                         vaultCard.unlockError = ""
+                        vaultCard.recentlyUnlocked = true
+                        unlockPulseTimer.restart()
                         root.activePasswordVault = ""
                         keyCatcher.forceActiveFocus()
                       } else {
@@ -583,11 +599,19 @@ Panel {
                         spacing: Style.space(10)
 
                         Text {
+                          id: statusIcon
                           textFormat: Text.PlainText
-                          text: vaultItem.modelData.isMounted ? "󰌿" : "󰌾"
+                          text: vaultCard.isUnlocking ? "󰑐" : (vaultItem.modelData.isMounted ? "󰌿" : "󰌾")
                           font.family: root.fontFamily; font.pixelSize: Style.font.display
-                          color: vaultItem.modelData.isMounted ? Color.accent : root.dim
+                          color: vaultItem.modelData.isMounted ? Color.accent : (vaultCard.isUnlocking ? Color.accent : root.dim)
                           anchors.verticalCenter: parent.verticalCenter
+                          scale: vaultCard.recentlyUnlocked ? 1.25 : 1.0
+                          Behavior on scale {
+                            NumberAnimation { duration: 250; easing.type: Easing.OutBack }
+                          }
+                          Behavior on color {
+                            ColorAnimation { duration: 200 }
+                          }
                         }
 
                         Column {
@@ -605,15 +629,22 @@ Panel {
                             BorderSurface {
                               radius: 4; anchors.verticalCenter: parent.verticalCenter
                               color: vaultItem.modelData.isMounted
-                                ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.2)
-                                : Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.15)
+                                ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, vaultCard.recentlyUnlocked ? 0.35 : 0.2)
+                                : (vaultCard.isUnlocking ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.15) : Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.15))
                               implicitWidth: badgeTxt.implicitWidth + Style.space(10)
                               implicitHeight: badgeTxt.implicitHeight + Style.space(4)
+                              scale: vaultCard.recentlyUnlocked ? 1.08 : 1.0
+                              Behavior on scale {
+                                NumberAnimation { duration: 250; easing.type: Easing.OutBack }
+                              }
+                              Behavior on color {
+                                ColorAnimation { duration: 200 }
+                              }
                               Text {
                                 id: badgeTxt; anchors.centerIn: parent; textFormat: Text.PlainText
-                                text: vaultItem.modelData.isMounted ? "UNLOCKED" : "LOCKED"
+                                text: vaultCard.isUnlocking ? "UNLOCKING..." : (vaultItem.modelData.isMounted ? (vaultCard.recentlyUnlocked ? "UNLOCKED 󰄬" : "UNLOCKED") : "LOCKED")
                                 font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true
-                                color: vaultItem.modelData.isMounted ? Color.accent : root.dim
+                                color: vaultItem.modelData.isMounted || vaultCard.isUnlocking ? Color.accent : root.dim
                               }
                             }
                           }
@@ -644,7 +675,7 @@ Panel {
                           visible: vaultItem.modelData.isMounted === true
                           text: "Lock"; iconText: "󰌾"; bordered: true
                           tooltipText: "Safely unmount & lock"
-                          onClicked: cryptomator.lockVault(vaultItem.modelData.mountPoint)
+                          onClicked: cryptomator.lockVault(vaultItem.modelData.mountPoint, vaultItem.modelData.path)
                         }
                         Button {
                           visible: vaultItem.modelData.isMounted !== true && !vaultCard.isPrompting
