@@ -1,0 +1,23 @@
+[
+  {
+    "id": "E7wbLih6BT3Y",
+    "name": "DFD",
+    "path": "/home/pandac/Secure_Files/DFD",
+    "mountPoint": "/home/pandac/.local/share/Cryptomator/mnt/DFD",
+    "readOnly": false
+  },
+  {
+    "id": "fPCd7qHFph1H",
+    "name": "P",
+    "path": "/home/pandac/Secure_Files/P",
+    "mountPoint": "/home/pandac/.local/share/Cryptomator/mnt/P",
+    "readOnly": false
+  },
+  {
+    "id": "le5F0LdBi_7B",
+    "name": "Ican",
+    "path": "/home/pandac/Secure_Files/Ican",
+    "mountPoint": "/home/pandac/.local/share/Cryptomator/mnt/Ican",
+    "readOnly": false
+  }
+]

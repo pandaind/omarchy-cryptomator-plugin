@@ -12,6 +12,10 @@ function parseStatus(raw) {
     return {
       ok: data.ok === true,
       installed: data.installed === true,
+      cliInstalled: data.cliInstalled === true,
+      guiInstalled: data.guiInstalled === true,
+      isBundled: data.isBundled === true,
+      cliPath: String(data.cliPath || ""),
       running: data.running === true,
       totalVaults: Number(data.totalVaults || 0),
       unlockedCount: Number(data.unlockedCount || 0),
@@ -34,7 +38,7 @@ function shortPath(path) {
 }
 
 function summaryText(unlockedCount, totalVaults, isInstalled, isRunning) {
-  if (!isInstalled) return "Cryptomator not installed"
+  if (!isInstalled) return "Cryptomator CLI not installed"
   if (totalVaults === 0) return "No vaults configured"
   if (unlockedCount === 0) return "All " + totalVaults + " vaults locked"
   if (unlockedCount === totalVaults) return "All " + totalVaults + " vaults unlocked"

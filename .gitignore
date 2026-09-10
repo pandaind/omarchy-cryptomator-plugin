@@ -1,0 +1,6 @@
+# Git ignore for Cryptomator Omarchy plugin
+vendor/
+__pycache__/
+*.pyc
+*.log
+.cache/

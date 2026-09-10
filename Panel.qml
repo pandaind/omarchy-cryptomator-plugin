@@ -17,6 +17,9 @@ Panel {
   implicitHeight: button.implicitHeight
 
   property string activePasswordVault: ""
+  property bool addingVault: false
+  property string newVaultPath: ""
+  property string newVaultName: ""
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color barForeground: bar ? bar.barForeground : Color.foreground
@@ -42,16 +45,17 @@ Panel {
     function refresh(): string { cryptomator.refresh(); return "ok" }
     function lockAll(): string { cryptomator.lockAll(); return "ok" }
     function launch(): string { cryptomator.launchApp(); return "ok" }
-    function unlockWithPassword(vaultPath: string, pw: string): string {
-      cryptomator.unlockVaultWithPassword(vaultPath, "", pw)
-      return "started"
-    }
+    function setupBundle(): string { cryptomator.setupBundle(); return "started" }
     function status(): string {
       return Model.summaryText(cryptomator.unlockedCount, cryptomator.totalVaults, cryptomator.installed, cryptomator.running)
     }
     function dumpState(): string {
       return JSON.stringify({
         installed: cryptomator.installed,
+        cliInstalled: cryptomator.cliInstalled,
+        guiInstalled: cryptomator.guiInstalled,
+        isBundled: cryptomator.isBundled,
+        cliPath: cryptomator.cliPath,
         running: cryptomator.running,
         totalVaults: cryptomator.totalVaults,
         unlockedCount: cryptomator.unlockedCount,
@@ -77,7 +81,8 @@ Panel {
       if (buttonCode === Qt.RightButton) {
         cryptomator.lockAll()
       } else if (buttonCode === Qt.MiddleButton) {
-        cryptomator.launchApp()
+        if (cryptomator.guiInstalled) cryptomator.launchApp()
+        else cryptomator.refresh()
       } else {
         root.toggle()
       }
@@ -91,19 +96,20 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(440))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(560))
+    contentWidth: panel.fittedContentWidth(Style.space(450))
+    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(600))
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: root.activePasswordVault !== ""
+      blocked: root.activePasswordVault !== "" || root.addingVault
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
         if (t === "r" || t === "R") cryptomator.refresh()
         else if (t === "l" || t === "L") cryptomator.lockAll()
-        else if (t === "o" || t === "O") cryptomator.launchApp()
+        else if ((t === "o" || t === "O") && cryptomator.guiInstalled) cryptomator.launchApp()
+        else if (t === "a" || t === "A") root.addingVault = !root.addingVault
       }
 
       Flickable {
@@ -127,7 +133,7 @@ Panel {
             id: hero
             width: parent.width
             title: "Cryptomator"
-            meta: cryptomator.unlocking ? "Unlocking vault..." : Model.summaryText(cryptomator.unlockedCount, cryptomator.totalVaults, cryptomator.installed, cryptomator.running)
+            meta: cryptomator.unlocking ? "Unlocking vault..." : (cryptomator.settingUpBundle ? "Downloading CLI bundle..." : Model.summaryText(cryptomator.unlockedCount, cryptomator.totalVaults, cryptomator.installed, cryptomator.running))
             foreground: root.foreground
             fontFamily: root.fontFamily
             iconComponent: Component {
@@ -145,10 +151,11 @@ Panel {
 
                 Button {
                   visible: !cryptomator.installed
-                  text: "Install"
+                  text: cryptomator.settingUpBundle ? "Downloading..." : "Setup CLI"
                   iconText: "󰉍"
                   bordered: true
-                  onClicked: cryptomator.installApp()
+                  enabled: !cryptomator.settingUpBundle
+                  onClicked: cryptomator.setupBundle()
                 }
 
                 Button {
@@ -160,7 +167,7 @@ Panel {
                 }
 
                 Button {
-                  visible: cryptomator.installed && cryptomator.unlockedCount === 0
+                  visible: cryptomator.installed && cryptomator.guiInstalled && cryptomator.unlockedCount === 0
                   text: "Open App"
                   iconText: "󰝰"
                   bordered: true
@@ -191,7 +198,7 @@ Panel {
 
               Text {
                 textFormat: Text.PlainText
-                text: "Cryptomator is not installed"
+                text: "Cryptomator CLI Not Installed"
                 font.bold: true
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
@@ -200,7 +207,7 @@ Panel {
 
               Text {
                 textFormat: Text.PlainText
-                text: "Transparent client-side encryption of your files in the cloud or on local disk."
+                text: "Download official headless CLI bundle from github.com/cryptomator/cli to decrypt & manage vaults directly without the desktop app."
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 color: root.dim
@@ -209,17 +216,18 @@ Panel {
               }
 
               Button {
-                text: "Install Cryptomator (AUR)"
+                text: cryptomator.settingUpBundle ? "Downloading bundle..." : "Download Bundled CLI (GitHub)"
                 iconText: "󰉍"
                 bordered: true
-                onClicked: cryptomator.installApp()
+                enabled: !cryptomator.settingUpBundle
+                onClicked: cryptomator.setupBundle()
               }
             }
           }
 
           // ----------------------------------------- Empty Vaults Banner
           BorderSurface {
-            visible: cryptomator.installed && cryptomator.totalVaults === 0
+            visible: cryptomator.installed && cryptomator.totalVaults === 0 && !root.addingVault
             width: parent.width
             radius: Style.cornerRadius
             color: Style.selectedFillFor(root.foreground, Color.accent)
@@ -243,7 +251,7 @@ Panel {
 
               Text {
                 textFormat: Text.PlainText
-                text: "Add an encrypted vault in Cryptomator to manage and monitor it here."
+                text: "Add an existing Cryptomator vault folder to manage and unlock it standalone."
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 color: root.dim
@@ -252,10 +260,110 @@ Panel {
               }
 
               Button {
-                text: "Open Cryptomator"
-                iconText: "󰝰"
+                text: "Add Vault"
+                iconText: "󰐕"
                 bordered: true
-                onClicked: cryptomator.launchApp()
+                accent: Color.accent
+                onClicked: root.addingVault = true
+              }
+            }
+          }
+
+          // ----------------------------------------- Inline Add Vault Card
+          BorderSurface {
+            visible: root.addingVault
+            width: parent.width
+            radius: Style.cornerRadius
+            color: Style.hoverFillFor(root.foreground, Color.accent)
+            topPadding: Style.space(10)
+            bottomPadding: Style.space(10)
+            leftPadding: Style.space(12)
+            rightPadding: Style.space(12)
+
+            Column {
+              width: parent.width
+              spacing: Style.space(8)
+
+              RowLayout {
+                width: parent.width
+
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Add Existing Vault"
+                  font.bold: true
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  color: root.foreground
+                  Layout.alignment: Qt.AlignVCenter
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                  iconText: "󰅖"
+                  bordered: true
+                  tooltipText: "Close"
+                  onClicked: {
+                    root.addingVault = false
+                    root.newVaultPath = ""
+                    keyCatcher.forceActiveFocus()
+                  }
+                }
+              }
+
+              TextField {
+                id: addVaultInput
+                width: parent.width
+                placeholderText: "Path to vault directory (e.g. ~/Secure_Files/MyVault)"
+                font.family: root.fontFamily
+                foreground: root.foreground
+                text: root.newVaultPath
+                onTextChanged: root.newVaultPath = text
+
+                onAccepted: {
+                  if (text.trim().length > 0) {
+                    cryptomator.addVault(text.trim(), "")
+                    root.addingVault = false
+                    root.newVaultPath = ""
+                    keyCatcher.forceActiveFocus()
+                  }
+                }
+
+                Keys.onEscapePressed: {
+                  root.addingVault = false
+                  root.newVaultPath = ""
+                  keyCatcher.forceActiveFocus()
+                }
+
+                onVisibleChanged: if (visible) Qt.callLater(forceActiveFocus)
+              }
+
+              Row {
+                spacing: Style.space(6)
+
+                Button {
+                  text: "Register Vault"
+                  iconText: "󰐕"
+                  bordered: true
+                  accent: Color.accent
+                  enabled: root.newVaultPath.trim().length > 0
+                  onClicked: {
+                    cryptomator.addVault(root.newVaultPath.trim(), "")
+                    root.addingVault = false
+                    root.newVaultPath = ""
+                    keyCatcher.forceActiveFocus()
+                  }
+                }
+
+                Button {
+                  text: "Cancel"
+                  bordered: true
+                  onClicked: {
+                    root.addingVault = false
+                    root.newVaultPath = ""
+                    keyCatcher.forceActiveFocus()
+                  }
+                }
               }
             }
           }
@@ -266,8 +374,25 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
 
-            PanelSectionHeader {
-              text: "VAULTS (" + cryptomator.vaults.length + ")"
+            RowLayout {
+              width: parent.width
+
+              PanelSectionHeader {
+                text: "VAULTS (" + cryptomator.vaults.length + ")"
+                Layout.alignment: Qt.AlignVCenter
+              }
+
+              Item { Layout.fillWidth: true }
+
+              Button {
+                visible: !root.addingVault
+                iconText: "󰐕"
+                text: "Add"
+                bordered: true
+                fontSize: Style.font.bodySmall
+                tooltipText: "Add existing vault directory"
+                onClicked: root.addingVault = true
+              }
             }
 
             Repeater {
@@ -423,7 +548,7 @@ Panel {
                       }
 
                       Button {
-                        visible: modelData.isMounted !== true && !vaultCard.isThisVaultPrompting
+                        visible: modelData.isMounted !== true && !vaultCard.isThisVaultPrompting && cryptomator.guiInstalled
                         iconText: "󰝰"
                         bordered: true
                         tooltipText: "Open in Cryptomator GUI"
@@ -431,7 +556,7 @@ Panel {
                       }
 
                       Button {
-                        visible: modelData.isMounted !== true && vaultCard.isThisVaultPrompting
+                        visible: modelData.isMounted !== true && vaultCard.isThisVaultPrompting && cryptomator.guiInstalled
                         iconText: "󰝰"
                         text: "GUI"
                         bordered: true
@@ -558,7 +683,7 @@ Panel {
 
             Text {
               textFormat: Text.PlainText
-              text: "Cryptomator: " + (cryptomator.running ? "Active" : "Idle")
+              text: "Cryptomator: " + (cryptomator.isBundled ? "Bundled CLI" : (cryptomator.cliInstalled ? "System CLI" : (cryptomator.guiInstalled ? "GUI" : "Not installed")))
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               color: root.dim
@@ -578,6 +703,7 @@ Panel {
               }
 
               Button {
+                visible: cryptomator.guiInstalled
                 iconText: "󰝰"
                 text: "Open GUI"
                 fontSize: Style.font.bodySmall
@@ -595,5 +721,6 @@ Panel {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   } else {
     root.activePasswordVault = ""
+    root.addingVault = false
   }
 }

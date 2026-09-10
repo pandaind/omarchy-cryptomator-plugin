@@ -10,6 +10,10 @@ Item {
   property var settings: ({})
 
   property bool installed: false
+  property bool cliInstalled: false
+  property bool guiInstalled: false
+  property bool isBundled: false
+  property string cliPath: ""
   property bool running: false
   property int totalVaults: 0
   property int unlockedCount: 0
@@ -20,8 +24,10 @@ Item {
   property bool unlocking: unlockProcess.running
   property string unlockingVaultPath: ""
   property string lastUnlockError: ""
+  property bool settingUpBundle: setupProcess.running
 
   signal unlockFinished(string vaultPath, bool success, string message)
+  signal setupFinished(bool success, string message)
 
   readonly property int refreshIntervalSec: {
     var val = settings ? settings.refreshIntervalSec : 10
@@ -37,6 +43,8 @@ Item {
   property string _statusError: ""
   property string _unlockOutput: ""
   property string _unlockError: ""
+  property string _setupOutput: ""
+  property string _setupError: ""
 
   function refresh() {
     if (statusProcess.running) return
@@ -54,6 +62,10 @@ Item {
       return
     }
     installed = parsed.installed === true
+    cliInstalled = parsed.cliInstalled === true
+    guiInstalled = parsed.guiInstalled === true
+    isBundled = parsed.isBundled === true
+    cliPath = parsed.cliPath || ""
     running = parsed.running === true
     totalVaults = parsed.totalVaults || 0
     unlockedCount = parsed.unlockedCount || 0
@@ -61,10 +73,13 @@ Item {
     lastError = ""
   }
 
-  function runAction(action, arg) {
+  function runAction(action, arg, arg2) {
     var cmd = ["python3", actionsScript, action]
     if (arg && String(arg).trim() !== "") {
       cmd.push(String(arg))
+    }
+    if (arg2 && String(arg2).trim() !== "") {
+      cmd.push(String(arg2))
     }
     Quickshell.execDetached(cmd)
     delayedRefresh.restart()
@@ -102,8 +117,20 @@ Item {
     runAction("launch")
   }
 
-  function installApp() {
-    runAction("install")
+  function addVault(vaultPath, name) {
+    runAction("add-vault", vaultPath, name || "")
+  }
+
+  function removeVault(vaultPath) {
+    runAction("remove-vault", vaultPath)
+  }
+
+  function setupBundle() {
+    if (setupProcess.running) return
+    _setupOutput = ""
+    _setupError = ""
+    setupProcess.command = ["python3", actionsScript, "setup-bundle"]
+    setupProcess.running = true
   }
 
   Timer {
@@ -186,6 +213,31 @@ Item {
       root.delayedRefresh.restart()
       root.unlockFinished(vPath, success, msg)
       root.unlockingVaultPath = ""
+    }
+  }
+
+  Process {
+    id: setupProcess
+    running: false
+    command: []
+
+    stdout: StdioCollector {
+      id: setupStdout
+      waitForEnd: true
+      onStreamFinished: root._setupOutput = text
+    }
+    stderr: StdioCollector {
+      id: setupStderr
+      waitForEnd: true
+      onStreamFinished: root._setupError = text
+    }
+
+    onExited: function(exitCode) {
+      var out = String(setupStdout.text || root._setupOutput || "").trim()
+      var err = String(setupStderr.text || root._setupError || "").trim()
+      var success = (exitCode === 0)
+      root.delayedRefresh.restart()
+      root.setupFinished(success, success ? (out || "Bundle installed successfully") : (err || "Bundle setup failed"))
     }
   }
 

@@ -1,12 +1,43 @@
 #!/usr/bin/env python3
-"""Cryptomator action runner for Omarchy shell."""
+"""Cryptomator action runner for Omarchy shell with bundled cryptomator-cli support."""
 
+import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import time
+import urllib.request
+import zipfile
 from pathlib import Path
+
+
+def find_cryptomator_cli():
+    """Locate the bundled or system cryptomator-cli binary."""
+    plugin_dir = Path(__file__).resolve().parent
+
+    # 1. Bundled inside the plugin directory
+    bundled = plugin_dir / "vendor" / "cryptomator-cli" / "bin" / "cryptomator-cli"
+    if bundled.is_file() and os.access(bundled, os.X_OK):
+        return str(bundled)
+
+    # 2. In user's local share directory
+    user_bundle = Path.home() / ".local" / "share" / "cryptomator-cli" / "bin" / "cryptomator-cli"
+    if user_bundle.is_file() and os.access(user_bundle, os.X_OK):
+        return str(user_bundle)
+
+    # 3. In PATH
+    which_cli = shutil.which("cryptomator-cli")
+    if which_cli:
+        return which_cli
+
+    # 4. In ~/.local/bin
+    local_bin = Path.home() / ".local" / "bin" / "cryptomator-cli"
+    if local_bin.is_file() and os.access(local_bin, os.X_OK):
+        return str(local_bin)
+
+    return None
 
 
 def run_detached(cmd):
@@ -60,14 +91,13 @@ def lock_mount(mount_point):
 
 def lock_all():
     """Find all active Cryptomator mounts and lock them."""
-    script_dir = Path(__file__).parent
+    script_dir = Path(__file__).resolve().parent
     status_script = script_dir / "status.py"
     if not status_script.exists():
         return
     res = subprocess.run([sys.executable, str(status_script)], check=False, capture_output=True, text=True)
     if res.returncode != 0:
         return
-    import json
     try:
         data = json.loads(res.stdout)
         vaults = data.get("vaults", [])
@@ -79,16 +109,16 @@ def lock_all():
 
 
 def unlock_vault(vault_path):
-    """Launch Cryptomator GUI with the vault path to prompt unlock."""
+    """Launch Cryptomator GUI if present; otherwise notify user to use inline password."""
     cryptomator_bin = shutil.which("cryptomator")
-    if not cryptomator_bin:
-        print("Cryptomator not installed", file=sys.stderr)
-        return False
-    return run_detached([cryptomator_bin, vault_path])
+    if cryptomator_bin:
+        return run_detached([cryptomator_bin, vault_path])
+    print("Desktop GUI not installed; please use inline unlock with your password.", file=sys.stderr)
+    return False
 
 
 def unlock_with_password(vault_path, mount_point, password):
-    """Unlock a Cryptomator vault headlessly using cryptomator-cli."""
+    """Unlock a Cryptomator vault headlessly using bundled or system cryptomator-cli."""
     if not vault_path or not os.path.exists(vault_path):
         print(f"Vault path does not exist: {vault_path}", file=sys.stderr)
         return False
@@ -97,14 +127,9 @@ def unlock_with_password(vault_path, mount_point, password):
         print("Password cannot be empty", file=sys.stderr)
         return False
 
-    cli = shutil.which("cryptomator-cli")
+    cli = find_cryptomator_cli()
     if not cli:
-        fallback = Path.home() / ".local" / "bin" / "cryptomator-cli"
-        if fallback.exists():
-            cli = str(fallback)
-
-    if not cli:
-        print("cryptomator-cli is not installed. Please install it or open the desktop app.", file=sys.stderr)
+        print("cryptomator-cli is not installed or bundled. Run setup-bundle first.", file=sys.stderr)
         return False
 
     if not mount_point:
@@ -114,7 +139,6 @@ def unlock_with_password(vault_path, mount_point, password):
 
     os.makedirs(mount_point, exist_ok=True)
 
-    # Check if already mounted
     if os.path.ismount(mount_point):
         print(f"Vault is already mounted at {mount_point}")
         return True
@@ -156,7 +180,6 @@ def unlock_with_password(vault_path, mount_point, password):
     while time.time() - start_time < 8.0:
         ret = proc.poll()
         if ret is not None:
-            # Process exited prematurely -> unlock failed
             err_msg = "Incorrect password"
             try:
                 if log_path.exists():
@@ -194,12 +217,142 @@ def unlock_with_password(vault_path, mount_point, password):
     return False
 
 
-def launch_cryptomator():
-    """Launch Cryptomator main window."""
-    cryptomator_bin = shutil.which("cryptomator")
-    if not cryptomator_bin:
+def setup_bundle():
+    """Download and extract official cryptomator-cli into vendor/ directory."""
+    machine = platform.machine().lower()
+    if machine in ["x86_64", "amd64"]:
+        arch = "x64"
+    elif machine in ["aarch64", "arm64"]:
+        arch = "aarch64"
+    else:
+        print(f"Unsupported architecture: {machine}", file=sys.stderr)
         return False
-    return run_detached([cryptomator_bin])
+
+    version = "0.6.2"
+    url = f"https://github.com/cryptomator/cli/releases/download/{version}/cryptomator-cli-{version}-linux-{arch}.zip"
+
+    plugin_dir = Path(__file__).resolve().parent
+    vendor_dir = plugin_dir / "vendor"
+    vendor_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = vendor_dir / "cryptomator-cli"
+
+    zip_path = vendor_dir / f"cryptomator-cli-{version}.zip"
+
+    print(f"Downloading cryptomator-cli {version} from {url}...")
+    try:
+        urllib.request.urlretrieve(url, zip_path)
+    except Exception as e:
+        print(f"Download failed: {e}", file=sys.stderr)
+        return False
+
+    print("Extracting bundle...")
+    try:
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(vendor_dir)
+        zip_path.unlink(missing_ok=True)
+
+        bin_file = target_dir / "bin" / "cryptomator-cli"
+        if bin_file.exists():
+            bin_file.chmod(bin_file.stat().st_mode | 0o755)
+        launcher = target_dir / "lib" / "libapplauncher.so"
+        if launcher.exists():
+            launcher.chmod(launcher.stat().st_mode | 0o755)
+
+        print(f"Successfully installed bundled cryptomator-cli to {target_dir}")
+        return True
+    except Exception as e:
+        print(f"Extraction failed: {e}", file=sys.stderr)
+        return False
+
+
+def add_vault(vault_path, display_name=None):
+    """Add a vault directory to local vaults.json."""
+    if not vault_path:
+        print("Vault path required", file=sys.stderr)
+        return False
+
+    path_obj = Path(vault_path).expanduser().resolve()
+    if not path_obj.exists() or not path_obj.is_dir():
+        print(f"Directory '{path_obj}' does not exist.", file=sys.stderr)
+        return False
+
+    name = display_name or path_obj.name
+    plugin_dir = Path(__file__).resolve().parent
+    vaults_file = plugin_dir / "vaults.json"
+
+    vaults = []
+    if vaults_file.exists():
+        try:
+            with open(vaults_file, "r", encoding="utf-8") as f:
+                vaults = json.load(f)
+                if not isinstance(vaults, list):
+                    vaults = []
+        except Exception:
+            vaults = []
+
+    for v in vaults:
+        if Path(v.get("path", "")).expanduser().resolve() == path_obj:
+            print(f"Vault already registered: {name}")
+            return True
+
+    data_dir = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    default_mnt = str(Path(data_dir) / "Cryptomator" / "mnt" / name)
+
+    import uuid
+    vaults.append({
+        "id": uuid.uuid4().hex[:12],
+        "name": name,
+        "path": str(path_obj),
+        "mountPoint": default_mnt,
+        "readOnly": False,
+    })
+
+    with open(vaults_file, "w", encoding="utf-8") as f:
+        json.dump(vaults, f, indent=2)
+
+    print(f"Added vault '{name}' ({path_obj})")
+    return True
+
+
+def remove_vault(vault_path):
+    """Remove a vault from local vaults.json."""
+    if not vault_path:
+        return False
+    path_obj = Path(vault_path).expanduser().resolve()
+    plugin_dir = Path(__file__).resolve().parent
+    vaults_file = plugin_dir / "vaults.json"
+    if not vaults_file.exists():
+        return True
+
+    try:
+        with open(vaults_file, "r", encoding="utf-8") as f:
+            vaults = json.load(f)
+            if not isinstance(vaults, list):
+                vaults = []
+    except Exception:
+        return False
+
+    new_vaults = [v for v in vaults if Path(v.get("path", "")).expanduser().resolve() != path_obj]
+
+    with open(vaults_file, "w", encoding="utf-8") as f:
+        json.dump(new_vaults, f, indent=2)
+
+    print(f"Removed vault at {path_obj}")
+    return True
+
+
+def launch_cryptomator():
+    """Launch Cryptomator GUI or open mount dir if GUI not installed."""
+    cryptomator_bin = shutil.which("cryptomator")
+    if cryptomator_bin:
+        return run_detached([cryptomator_bin])
+    data_dir = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    mount_dir = Path(data_dir) / "Cryptomator" / "mnt"
+    mount_dir.mkdir(parents=True, exist_ok=True)
+    return reveal_in_file_manager(str(mount_dir))
 
 
 def reveal_in_file_manager(mount_point):
@@ -212,21 +365,9 @@ def reveal_in_file_manager(mount_point):
     return False
 
 
-def install_cryptomator():
-    """Launch terminal to install cryptomator via omarchy pkg."""
-    omarchy_bin = shutil.which("omarchy")
-    if omarchy_bin:
-        return run_detached([omarchy_bin, "launch", "terminal", "omarchy", "pkg", "aur", "add", "cryptomator-bin"])
-    for term in ["ghostty", "alacritty", "kitty", "foot", "xterm"]:
-        term_bin = shutil.which(term)
-        if term_bin:
-            return run_detached([term_bin, "-e", "bash", "-c", "yay -S cryptomator-bin; read -p 'Press enter to exit'"])
-    return False
-
-
 def main():
     if len(sys.argv) < 2:
-        print("Usage: actions.py <lock|lock-all|unlock|unlock-password|launch|reveal|install> [arg] [arg2]")
+        print("Usage: actions.py <lock|lock-all|unlock|unlock-password|add-vault|remove-vault|setup-bundle|launch|reveal> [arg] [arg2]")
         sys.exit(1)
 
     action = sys.argv[1].lower()
@@ -243,12 +384,20 @@ def main():
         password = sys.stdin.readline().rstrip("\r\n")
         if not unlock_with_password(arg, mount_point, password):
             sys.exit(1)
+    elif action == "setup-bundle":
+        if not setup_bundle():
+            sys.exit(1)
+    elif action == "add-vault":
+        name = sys.argv[3] if len(sys.argv) > 3 else None
+        if not add_vault(arg, name):
+            sys.exit(1)
+    elif action == "remove-vault":
+        if not remove_vault(arg):
+            sys.exit(1)
     elif action == "launch":
         launch_cryptomator()
     elif action == "reveal":
         reveal_in_file_manager(arg)
-    elif action == "install":
-        install_cryptomator()
     else:
         print(f"Unknown action: {action}", file=sys.stderr)
         sys.exit(1)
