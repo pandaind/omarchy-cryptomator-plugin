@@ -43,6 +43,19 @@ Panel {
     function status(): string {
       return Model.summaryText(cryptomator.unlockedCount, cryptomator.totalVaults, cryptomator.installed, cryptomator.running)
     }
+    function dumpState(): string {
+      return JSON.stringify({
+        installed: cryptomator.installed,
+        running: cryptomator.running,
+        totalVaults: cryptomator.totalVaults,
+        unlockedCount: cryptomator.unlockedCount,
+        vaultsCount: cryptomator.vaults.length,
+        lastError: cryptomator.lastError
+      })
+    }
+    function dumpVaults(): string {
+      return JSON.stringify(cryptomator.vaults)
+    }
   }
 
   BarIconButton {
@@ -255,85 +268,95 @@ Panel {
 
               delegate: BorderSurface {
                 id: vaultCard
+                required property var modelData
+                required property int index
+
                 width: column.width
+                implicitHeight: Style.space(64)
                 radius: Style.cornerRadius
                 color: modelData.isMounted ? Style.selectedFillFor(root.foreground, Color.accent) : Style.hoverFillFor(root.foreground, Color.accent)
-                topPadding: Style.space(10)
-                bottomPadding: Style.space(10)
-                leftPadding: Style.space(12)
-                rightPadding: Style.space(12)
 
-                RowLayout {
-                  width: parent.width
-                  spacing: Style.space(10)
+                Item {
+                  anchors.fill: parent
+                  anchors.leftMargin: Style.space(12)
+                  anchors.rightMargin: Style.space(12)
+                  anchors.topMargin: Style.space(8)
+                  anchors.bottomMargin: Style.space(8)
 
-                  // Status Icon
-                  Text {
-                    textFormat: Text.PlainText
-                    text: modelData.isMounted ? "󰌿" : "󰌾"
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.display
-                    color: modelData.isMounted ? Color.accent : root.dim
-                    Layout.alignment: Qt.AlignVCenter
-                  }
-
-                  // Vault Info
-                  ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: Style.space(2)
-
-                    RowLayout {
-                      spacing: Style.space(8)
-
-                      Text {
-                        textFormat: Text.PlainText
-                        text: modelData.name
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.body
-                        font.bold: true
-                        color: root.foreground
-                        elide: Text.ElideRight
-                      }
-
-                      // Badge
-                      BorderSurface {
-                        radius: 4
-                        color: modelData.isMounted ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.2) : Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.15)
-                        leftPadding: Style.space(6)
-                        rightPadding: Style.space(6)
-                        topPadding: Style.space(2)
-                        bottomPadding: Style.space(2)
-
-                        Text {
-                          textFormat: Text.PlainText
-                          text: modelData.isMounted ? "UNLOCKED" : "LOCKED"
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.caption
-                          font.bold: true
-                          color: modelData.isMounted ? Color.accent : root.dim
-                        }
-                      }
-                    }
+                  Row {
+                    id: leftContent
+                    anchors.left: parent.left
+                    anchors.right: actionButtons.left
+                    anchors.rightMargin: Style.space(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(10)
 
                     Text {
                       textFormat: Text.PlainText
-                      text: modelData.isMounted ? Model.shortPath(modelData.mountPoint) : Model.shortPath(modelData.path)
+                      text: modelData.isMounted ? "󰌿" : "󰌾"
                       font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                      color: root.dim
-                      elide: Text.ElideMiddle
-                      Layout.fillWidth: true
+                      font.pixelSize: Style.font.display
+                      color: modelData.isMounted ? Color.accent : root.dim
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Column {
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Math.max(10, leftContent.width - Style.space(34))
+                      spacing: Style.space(2)
+
+                      Row {
+                        spacing: Style.space(8)
+
+                        Text {
+                          textFormat: Text.PlainText
+                          text: modelData.name || ""
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.body
+                          font.bold: true
+                          color: root.foreground
+                          elide: Text.ElideRight
+                        }
+
+                        BorderSurface {
+                          radius: 4
+                          color: modelData.isMounted ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.2) : Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.15)
+                          implicitWidth: badgeText.implicitWidth + Style.space(10)
+                          implicitHeight: badgeText.implicitHeight + Style.space(4)
+
+                          Text {
+                            id: badgeText
+                            anchors.centerIn: parent
+                            textFormat: Text.PlainText
+                            text: modelData.isMounted ? "UNLOCKED" : "LOCKED"
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.caption
+                            font.bold: true
+                            color: modelData.isMounted ? Color.accent : root.dim
+                          }
+                        }
+                      }
+
+                      Text {
+                        textFormat: Text.PlainText
+                        text: modelData.isMounted ? Model.shortPath(modelData.mountPoint) : Model.shortPath(modelData.path)
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        color: root.dim
+                        elide: Text.ElideMiddle
+                        width: parent.width
+                      }
                     }
                   }
 
-                  // Action Buttons
                   Row {
+                    id: actionButtons
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
                     spacing: Style.space(6)
-                    Layout.alignment: Qt.AlignVCenter
 
-                    // When Unlocked
                     Button {
-                      visible: modelData.isMounted
+                      visible: modelData.isMounted === true
                       text: "Browse"
                       iconText: "󰉋"
                       bordered: true
@@ -342,7 +365,7 @@ Panel {
                     }
 
                     Button {
-                      visible: modelData.isMounted
+                      visible: modelData.isMounted === true
                       text: "Lock"
                       iconText: "󰌾"
                       bordered: true
@@ -350,9 +373,8 @@ Panel {
                       onClicked: cryptomator.lockVault(modelData.mountPoint)
                     }
 
-                    // When Locked
                     Button {
-                      visible: !modelData.isMounted
+                      visible: modelData.isMounted !== true
                       text: "Unlock"
                       iconText: "󰌿"
                       bordered: true
