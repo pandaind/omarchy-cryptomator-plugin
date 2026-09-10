@@ -9,8 +9,8 @@ import "Model.js" as Model
 
 Panel {
   id: root
-  moduleName: "pandac.cryptomator"
-  ipcTarget: "pandac.cryptomator"
+  moduleName: "omarchy-cryptomator-plugin"
+  ipcTarget: "omarchy-cryptomator-plugin"
   manageIpc: false
 
   implicitWidth: button.implicitWidth

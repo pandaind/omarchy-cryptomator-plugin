@@ -69,43 +69,47 @@ Designed natively for **Omarchy Linux** and **Hyprland**, it automatically adapt
 
 ## Installation
 
-### 1. Clone the Plugin
-
-Clone this repository into your Omarchy user plugins directory:
+Install directly with a single Omarchy command:
 
 ```bash
-git clone https://github.com/pandac/omarchy-cryptomator-plugin.git ~/.config/omarchy/plugins/pandac.cryptomator
+omarchy plugin add https://github.com/pandaind/omarchy-cryptomator-plugin.git --enable
 ```
 
-### 2. Enable in Shell Configuration
+> [!TIP]
+> This command automatically downloads, validates, and places the widget on your Omarchy status bar.
 
-Open `~/.config/omarchy/shell.json` and add `"pandac.cryptomator"` to your desired bar section (such as `bar.layout.right`):
+### Manual Installation (Optional)
 
-```json
-{
-  "bar": {
-    "layout": {
-      "right": [
-        { "id": "pandac.cryptomator" },
-        { "id": "omarchy.tray" },
-        { "id": "omarchy.network" },
-        { "id": "omarchy.audio" },
-        { "id": "omarchy.power" }
-      ]
-    }
-  }
-}
-```
+If you prefer manual setup:
 
-### 3. Reload the Shell
+1. Clone the repository into your Omarchy user plugins directory:
+   ```bash
+   git clone https://github.com/pandaind/omarchy-cryptomator-plugin.git ~/.config/omarchy/plugins/omarchy-cryptomator-plugin
+   ```
 
-Apply the changes immediately:
+2. Add `"omarchy-cryptomator-plugin"` to your desired bar section in `~/.config/omarchy/shell.json`:
+   ```json
+   {
+     "bar": {
+       "layout": {
+         "right": [
+           { "id": "omarchy-cryptomator-plugin" },
+           { "id": "omarchy.tray" },
+           { "id": "omarchy.network" },
+           { "id": "omarchy.audio" },
+           { "id": "omarchy.power" }
+         ]
+       }
+     }
+   }
+   ```
 
-```bash
-omarchy-shell shell rescanPlugins
-# or
-omarchy-restart-shell
-```
+3. Reload the shell:
+   ```bash
+   omarchy-shell shell rescanPlugins
+   # or
+   omarchy-restart-shell
+   ```
 
 ---
 
@@ -138,10 +142,10 @@ To toggle the panel or lock all vaults via keyboard shortcuts, add bindings to y
 
 ```ini
 # Toggle panel
-bind = $mainMod, C, exec, omarchy-shell pandac.cryptomator toggle
+bind = $mainMod, C, exec, omarchy-shell omarchy-cryptomator-plugin toggle
 
 # Emergency lock all
-bind = $mainMod SHIFT, C, exec, omarchy-shell pandac.cryptomator lockAll
+bind = $mainMod SHIFT, C, exec, omarchy-shell omarchy-cryptomator-plugin lockAll
 ```
 
 ---
@@ -152,17 +156,17 @@ Control the widget from custom scripts or keybindings via `omarchy-shell`:
 
 ```bash
 # Toggle panel visibility
-omarchy-shell pandac.cryptomator toggle
+omarchy-shell omarchy-cryptomator-plugin toggle
 
 # Open or close the panel
-omarchy-shell pandac.cryptomator open
-omarchy-shell pandac.cryptomator close
+omarchy-shell omarchy-cryptomator-plugin open
+omarchy-shell omarchy-cryptomator-plugin close
 
 # Lock all open vaults
-omarchy-shell pandac.cryptomator lockAll
+omarchy-shell omarchy-cryptomator-plugin lockAll
 
 # Refresh vault status
-omarchy-shell pandac.cryptomator refresh
+omarchy-shell omarchy-cryptomator-plugin refresh
 ```
 
 ---
@@ -175,6 +179,7 @@ omarchy-shell pandac.cryptomator refresh
 
 ---
 
-## License
+## License & Credits
 
-This project is licensed under the [MIT License](LICENSE).
+- Licensed under the [MIT License](LICENSE).
+- Developed by [pandac.in](https://pandac.in).

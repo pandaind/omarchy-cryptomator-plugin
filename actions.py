@@ -330,11 +330,19 @@ def get_vaults_file():
     This prevents Quickshell's plugin watcher from triggering a full plugin reload on every edit.
     """
     data_dir = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
-    storage_dir = Path(data_dir) / "pandac.cryptomator"
+    storage_dir = Path(data_dir) / "omarchy-cryptomator-plugin"
     storage_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     target_file = storage_dir / "vaults.json"
 
     if not target_file.exists():
+        legacy_file = Path(data_dir) / "pandac.cryptomator" / "vaults.json"
+        if legacy_file.exists():
+            import shutil
+            try:
+                shutil.copy2(legacy_file, target_file)
+                return target_file
+            except Exception:
+                pass
         plugin_file = Path(__file__).resolve().parent / "vaults.json"
         if plugin_file.exists():
             return plugin_file

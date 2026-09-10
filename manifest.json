@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "pandac.cryptomator",
+  "id": "omarchy-cryptomator-plugin",
   "name": "Omarchy Cryptomator Plugin",
   "version": "1.0.0",
-  "author": "pandac",
+  "author": "pandac.in",
   "license": "MIT",
   "description": "Cryptomator vault status, quick unlock, unmount, and file manager integration in the Omarchy bar.",
   "kinds": [
