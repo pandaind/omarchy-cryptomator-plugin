@@ -278,7 +278,7 @@ Panel {
 
               Row {
                 spacing: Style.space(4)
-                visible: !root.formActive
+                visible: !root.formActive && cryptomator.vaults.length > 0
 
                 Button {
                   text: "Add Existing"; iconText: "󰙅"; bordered: true

@@ -111,6 +111,21 @@ If you prefer manual setup:
    omarchy-restart-shell
    ```
 
+### Uninstallation
+
+To remove the plugin:
+
+```bash
+omarchy plugin remove omarchy-cryptomator-plugin
+```
+
+For manual installations, remove the directory and reload the shell:
+
+```bash
+rm -rf ~/.config/omarchy/plugins/omarchy-cryptomator-plugin
+omarchy-restart-shell
+```
+
 ---
 
 ## Controls & Shortcuts
