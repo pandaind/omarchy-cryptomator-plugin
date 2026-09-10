@@ -66,7 +66,7 @@ def run_detached(cmd):
         return False
 
 
-def cleanup_cli_for_mount(mount_point):
+def cleanup_cli_for_mount(mount_point, force=False):
     """Ensure any cryptomator-cli process associated with mount_point terminates."""
     if not mount_point:
         return
@@ -74,30 +74,137 @@ def cleanup_cli_for_mount(mount_point):
         escaped_mount = re.escape(str(mount_point))
         res = subprocess.run(["pgrep", "-f", f"--mountPoint={escaped_mount}"], capture_output=True, text=True, check=False)
         if res.returncode == 0:
-            for pid_str in res.stdout.split():
+            pids = [int(p) for p in res.stdout.split() if p.isdigit()]
+            for pid in pids:
                 try:
-                    os.kill(int(pid_str), 15)  # SIGTERM
+                    os.kill(pid, 15)  # SIGTERM
                 except OSError:
                     pass
+            if force and pids:
+                time.sleep(0.3)
+                for pid in pids:
+                    try:
+                        os.kill(pid, 9)  # SIGKILL
+                    except OSError:
+                        pass
     except Exception:
         pass
 
 
-def lock_mount(mount_point):
-    """Unmount/lock a specific mount point using fusermount3."""
+def cleanup_cli_for_vault(vault_path, force=False):
+    """Ensure any cryptomator-cli process associated with vault_path terminates."""
+    if not vault_path:
+        return
+    try:
+        escaped_vault = re.escape(str(vault_path))
+        res = subprocess.run(["pgrep", "-f", escaped_vault], capture_output=True, text=True, check=False)
+        if res.returncode == 0:
+            pids = [int(p) for p in res.stdout.split() if p.isdigit()]
+            for pid in pids:
+                try:
+                    os.kill(pid, 15)  # SIGTERM
+                except OSError:
+                    pass
+            if force and pids:
+                time.sleep(0.3)
+                for pid in pids:
+                    try:
+                        os.kill(pid, 9)  # SIGKILL
+                    except OSError:
+                        pass
+    except Exception:
+        pass
+
+
+def close_file_manager_for_mount(mount_point=None, vault_path=None):
+    """Close any open file manager windows displaying this mount point or vault."""
+    targets = set()
+    if mount_point:
+        targets.add(Path(mount_point).name.lower())
+        targets.add(str(mount_point).lower())
+    if vault_path:
+        targets.add(Path(vault_path).name.lower())
+        targets.add(str(vault_path).lower())
+
+    if not targets:
+        return
+
+    try:
+        res = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, check=False)
+        if res.returncode == 0 and res.stdout:
+            clients = json.loads(res.stdout)
+            fm_classes = {
+                "org.gnome.nautilus", "nautilus", "org.kde.dolphin", "dolphin",
+                "thunar", "nemo", "pcmanfm", "io.elementary.files"
+            }
+            for c in clients:
+                c_class = str(c.get("class", "")).lower()
+                c_title = str(c.get("title", "")).lower()
+                c_initial = str(c.get("initialTitle", "")).lower()
+                addr = c.get("address")
+                if not addr:
+                    continue
+                is_fm = any(fm in c_class for fm in fm_classes)
+                matches = any(t in c_title or t in c_initial for t in targets)
+                if is_fm and matches:
+                    cmd_lua = f'hl.dsp.window.close({{ window = "address:{addr}" }})'
+                    subprocess.run(["hyprctl", "dispatch", cmd_lua], capture_output=True, check=False)
+    except Exception:
+        pass
+
+
+def lock_mount(mount_point, vault_path=None):
+    """Unmount/lock a specific mount point using fusermount3, forcing lazy unmount if busy."""
+    # 1. Close any file manager window currently viewing this folder
+    close_file_manager_for_mount(mount_point, vault_path)
+
+    # 2. If mount_point not provided, try to find it from vault_path or mounts
+    if not mount_point and vault_path:
+        try:
+            with open("/proc/mounts", "r", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2 and (Path(vault_path).name in parts[1] or "cryptomator" in parts[1].lower()):
+                        mount_point = parts[1]
+                        break
+        except Exception:
+            pass
+
     if not mount_point or not os.path.exists(mount_point):
-        return False
+        if vault_path:
+            cleanup_cli_for_vault(vault_path, force=True)
+        return True
+
     tool = shutil.which("fusermount3") or shutil.which("fusermount")
     if not tool:
         print("Neither fusermount3 nor fusermount found.", file=sys.stderr)
         return False
-    res = subprocess.run([tool, "-u", mount_point], check=False, capture_output=True, text=True)
+
+    # 3. Try standard unmount
+    res = subprocess.run([tool, "-u", str(mount_point)], check=False, capture_output=True, text=True)
+
+    # 4. If busy, try lazy unmount (-z) so it forces unmount immediately
+    if res.returncode != 0:
+        res = subprocess.run([tool, "-u", "-z", str(mount_point)], check=False, capture_output=True, text=True)
+
     if res.returncode != 0:
         gio = shutil.which("gio")
         if gio:
-            subprocess.run([gio, "mount", "-u", mount_point], check=False, capture_output=True)
-    cleanup_cli_for_mount(mount_point)
-    return res.returncode == 0
+            subprocess.run([gio, "mount", "-u", str(mount_point)], check=False, capture_output=True)
+
+    # 5. Clean up any lingering CLI process
+    cleanup_cli_for_mount(mount_point, force=True)
+    if vault_path:
+        cleanup_cli_for_vault(vault_path, force=True)
+
+    # Re-verify if unmounted from /proc/mounts
+    try:
+        with open("/proc/mounts", "r", encoding="utf-8") as f:
+            is_still_mounted = str(mount_point) in f.read()
+    except Exception:
+        is_still_mounted = os.path.ismount(str(mount_point))
+
+    return not is_still_mounted
 
 
 def lock_all():
@@ -114,7 +221,15 @@ def lock_all():
         vaults = data.get("vaults", [])
         for v in vaults:
             if v.get("isMounted"):
-                lock_mount(v.get("mountPoint"))
+                lock_mount(v.get("mountPoint"), v.get("path"))
+        # Force clean any remaining cryptomator-cli processes
+        res_pgrep = subprocess.run(["pgrep", "-f", "cryptomator-cli unlock"], capture_output=True, text=True, check=False)
+        if res_pgrep.returncode == 0:
+            for pid_str in res_pgrep.stdout.split():
+                try:
+                    os.kill(int(pid_str), 15)
+                except OSError:
+                    pass
     except Exception as e:
         print(f"Error locking all vaults: {e}", file=sys.stderr)
 
@@ -150,6 +265,10 @@ def unlock_with_password(vault_path, mount_point, password):
     if os.path.ismount(mount_point):
         print(f"Vault is already mounted at {mount_point}")
         return True
+
+    # Ensure any stale or lingering process for this mount or vault is terminated
+    cleanup_cli_for_mount(mount_point, force=True)
+    cleanup_cli_for_vault(vault_path, force=True)
 
     log_dir = Path.home() / ".local" / "state" / "cryptomator"
     safe_name = re.sub(r'[^a-zA-Z0-9_\-.]', '_', Path(vault_path).name) or "vault"
@@ -302,6 +421,16 @@ def setup_bundle():
         launcher = target_dir / "lib" / "libapplauncher.so"
         if launcher.exists():
             launcher.chmod(launcher.stat().st_mode | 0o755)
+
+        # Cap memory heap to 96M in cryptomator-cli.cfg to prevent excessive RAM usage
+        cfg_file = target_dir / "lib" / "app" / "cryptomator-cli.cfg"
+        if cfg_file.exists():
+            try:
+                cfg_content = cfg_file.read_text(encoding="utf-8")
+                cfg_content = re.sub(r'-Xmx\d+m', '-Xmx96m', cfg_content)
+                cfg_file.write_text(cfg_content, encoding="utf-8")
+            except Exception:
+                pass
 
         print(f"Successfully installed verified cryptomator-cli to {target_dir}")
         return True
@@ -516,7 +645,9 @@ def main():
     arg = sys.argv[2] if len(sys.argv) > 2 else ""
 
     if action == "lock":
-        lock_mount(arg)
+        arg2 = sys.argv[3] if len(sys.argv) > 3 else ""
+        if not lock_mount(arg, arg2):
+            sys.exit(1)
     elif action == "lock-all":
         lock_all()
     elif action == "unlock":

@@ -111,7 +111,7 @@ Item {
     }
     root.vaults = updated
     root.unlockedCount = newUnlockedCount
-    runAction("lock", mountPoint)
+    runAction("lock", mountPoint || "", vaultPath || "")
   }
 
   function unlockVaultWithPassword(vaultPath, mountPoint, password) {
