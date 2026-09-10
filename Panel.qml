@@ -16,6 +16,8 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  property string activePasswordVault: ""
+
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color barForeground: bar ? bar.barForeground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
@@ -40,6 +42,10 @@ Panel {
     function refresh(): string { cryptomator.refresh(); return "ok" }
     function lockAll(): string { cryptomator.lockAll(); return "ok" }
     function launch(): string { cryptomator.launchApp(); return "ok" }
+    function unlockWithPassword(vaultPath: string, pw: string): string {
+      cryptomator.unlockVaultWithPassword(vaultPath, "", pw)
+      return "started"
+    }
     function status(): string {
       return Model.summaryText(cryptomator.unlockedCount, cryptomator.totalVaults, cryptomator.installed, cryptomator.running)
     }
@@ -85,12 +91,13 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(420))
+    contentWidth: panel.fittedContentWidth(Style.space(440))
     contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(560))
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: root.activePasswordVault !== ""
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
@@ -120,7 +127,7 @@ Panel {
             id: hero
             width: parent.width
             title: "Cryptomator"
-            meta: Model.summaryText(cryptomator.unlockedCount, cryptomator.totalVaults, cryptomator.installed, cryptomator.running)
+            meta: cryptomator.unlocking ? "Unlocking vault..." : Model.summaryText(cryptomator.unlockedCount, cryptomator.totalVaults, cryptomator.installed, cryptomator.running)
             foreground: root.foreground
             fontFamily: root.fontFamily
             iconComponent: Component {
@@ -271,116 +278,268 @@ Panel {
                 required property var modelData
                 required property int index
 
+                readonly property bool isThisVaultPrompting: root.activePasswordVault === modelData.path
+                readonly property bool isThisVaultUnlocking: cryptomator.unlocking && cryptomator.unlockingVaultPath === modelData.path
+                property string errorMessage: ""
+
                 width: column.width
-                implicitHeight: Style.space(64)
+                implicitHeight: cardContent.implicitHeight + Style.space(20)
                 radius: Style.cornerRadius
                 color: modelData.isMounted ? Style.selectedFillFor(root.foreground, Color.accent) : Style.hoverFillFor(root.foreground, Color.accent)
 
-                Item {
-                  anchors.fill: parent
+                Connections {
+                  target: cryptomator
+                  function onUnlockFinished(vaultPath, success, message) {
+                    if (vaultPath === vaultCard.modelData.path) {
+                      if (success) {
+                        vaultCard.errorMessage = ""
+                        root.activePasswordVault = ""
+                        keyCatcher.forceActiveFocus()
+                      } else {
+                        vaultCard.errorMessage = message || "Incorrect password"
+                        pwField.selectAll()
+                        pwField.forceActiveFocus()
+                      }
+                    }
+                  }
+                }
+
+                Column {
+                  id: cardContent
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.top: parent.top
                   anchors.leftMargin: Style.space(12)
                   anchors.rightMargin: Style.space(12)
-                  anchors.topMargin: Style.space(8)
-                  anchors.bottomMargin: Style.space(8)
+                  anchors.topMargin: Style.space(10)
+                  spacing: Style.space(10)
 
-                  Row {
-                    id: leftContent
-                    anchors.left: parent.left
-                    anchors.right: actionButtons.left
-                    anchors.rightMargin: Style.space(10)
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Style.space(10)
+                  // Main Row: Icon, Vault name/badge/path, and Action Buttons
+                  Item {
+                    width: parent.width
+                    implicitHeight: Math.max(leftInfo.implicitHeight, actionButtons.implicitHeight)
 
-                    Text {
-                      textFormat: Text.PlainText
-                      text: modelData.isMounted ? "󰌿" : "󰌾"
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.display
-                      color: modelData.isMounted ? Color.accent : root.dim
+                    Row {
+                      id: leftInfo
+                      anchors.left: parent.left
+                      anchors.right: actionButtons.left
+                      anchors.rightMargin: Style.space(8)
                       anchors.verticalCenter: parent.verticalCenter
-                    }
-
-                    Column {
-                      anchors.verticalCenter: parent.verticalCenter
-                      width: Math.max(10, leftContent.width - Style.space(34))
-                      spacing: Style.space(2)
-
-                      Row {
-                        spacing: Style.space(8)
-
-                        Text {
-                          textFormat: Text.PlainText
-                          text: modelData.name || ""
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.body
-                          font.bold: true
-                          color: root.foreground
-                          elide: Text.ElideRight
-                        }
-
-                        BorderSurface {
-                          radius: 4
-                          color: modelData.isMounted ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.2) : Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.15)
-                          implicitWidth: badgeText.implicitWidth + Style.space(10)
-                          implicitHeight: badgeText.implicitHeight + Style.space(4)
-
-                          Text {
-                            id: badgeText
-                            anchors.centerIn: parent
-                            textFormat: Text.PlainText
-                            text: modelData.isMounted ? "UNLOCKED" : "LOCKED"
-                            font.family: root.fontFamily
-                            font.pixelSize: Style.font.caption
-                            font.bold: true
-                            color: modelData.isMounted ? Color.accent : root.dim
-                          }
-                        }
-                      }
+                      spacing: Style.space(10)
 
                       Text {
                         textFormat: Text.PlainText
-                        text: modelData.isMounted ? Model.shortPath(modelData.mountPoint) : Model.shortPath(modelData.path)
+                        text: modelData.isMounted ? "󰌿" : "󰌾"
                         font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                        color: root.dim
-                        elide: Text.ElideMiddle
-                        width: parent.width
+                        font.pixelSize: Style.font.display
+                        color: modelData.isMounted ? Color.accent : root.dim
+                        anchors.verticalCenter: parent.verticalCenter
+                      }
+
+                      Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.max(10, leftInfo.width - Style.space(34))
+                        spacing: Style.space(2)
+
+                        Row {
+                          spacing: Style.space(8)
+
+                          Text {
+                            textFormat: Text.PlainText
+                            text: modelData.name || ""
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.body
+                            font.bold: true
+                            color: root.foreground
+                            elide: Text.ElideRight
+                          }
+
+                          BorderSurface {
+                            radius: 4
+                            color: modelData.isMounted ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.2) : Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.15)
+                            implicitWidth: badgeText.implicitWidth + Style.space(10)
+                            implicitHeight: badgeText.implicitHeight + Style.space(4)
+
+                            Text {
+                              id: badgeText
+                              anchors.centerIn: parent
+                              textFormat: Text.PlainText
+                              text: modelData.isMounted ? "UNLOCKED" : "LOCKED"
+                              font.family: root.fontFamily
+                              font.pixelSize: Style.font.caption
+                              font.bold: true
+                              color: modelData.isMounted ? Color.accent : root.dim
+                            }
+                          }
+                        }
+
+                        Text {
+                          textFormat: Text.PlainText
+                          text: modelData.isMounted ? Model.shortPath(modelData.mountPoint) : Model.shortPath(modelData.path)
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption
+                          color: root.dim
+                          elide: Text.ElideMiddle
+                          width: parent.width
+                        }
+                      }
+                    }
+
+                    Row {
+                      id: actionButtons
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.space(6)
+
+                      Button {
+                        visible: modelData.isMounted === true
+                        text: "Browse"
+                        iconText: "󰉋"
+                        bordered: true
+                        tooltipText: "Open in File Manager"
+                        onClicked: cryptomator.revealVault(modelData.mountPoint)
+                      }
+
+                      Button {
+                        visible: modelData.isMounted === true
+                        text: "Lock"
+                        iconText: "󰌾"
+                        bordered: true
+                        tooltipText: "Safely unmount & lock"
+                        onClicked: cryptomator.lockVault(modelData.mountPoint)
+                      }
+
+                      Button {
+                        visible: modelData.isMounted !== true && !vaultCard.isThisVaultPrompting
+                        text: "Unlock"
+                        iconText: "󰌿"
+                        bordered: true
+                        accent: Color.accent
+                        tooltipText: "Enter password to unlock"
+                        onClicked: {
+                          vaultCard.errorMessage = ""
+                          root.activePasswordVault = modelData.path
+                        }
+                      }
+
+                      Button {
+                        visible: modelData.isMounted !== true && !vaultCard.isThisVaultPrompting
+                        iconText: "󰝰"
+                        bordered: true
+                        tooltipText: "Open in Cryptomator GUI"
+                        onClicked: cryptomator.unlockVault(modelData.path)
+                      }
+
+                      Button {
+                        visible: modelData.isMounted !== true && vaultCard.isThisVaultPrompting
+                        iconText: "󰝰"
+                        text: "GUI"
+                        bordered: true
+                        tooltipText: "Open in Cryptomator GUI instead"
+                        onClicked: cryptomator.unlockVault(modelData.path)
+                      }
+
+                      Button {
+                        visible: modelData.isMounted !== true && vaultCard.isThisVaultPrompting
+                        iconText: "󰅖"
+                        bordered: true
+                        tooltipText: "Cancel inline unlock"
+                        onClicked: {
+                          vaultCard.errorMessage = ""
+                          root.activePasswordVault = ""
+                          keyCatcher.forceActiveFocus()
+                        }
                       }
                     }
                   }
 
-                  Row {
-                    id: actionButtons
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
+                  // Inline Password Prompt Area
+                  Column {
+                    visible: modelData.isMounted !== true && vaultCard.isThisVaultPrompting
+                    width: parent.width
                     spacing: Style.space(6)
 
-                    Button {
-                      visible: modelData.isMounted === true
-                      text: "Browse"
-                      iconText: "󰉋"
-                      bordered: true
-                      tooltipText: "Open in File Manager"
-                      onClicked: cryptomator.revealVault(modelData.mountPoint)
+                    Row {
+                      width: parent.width
+                      spacing: Style.space(6)
+
+                      TextField {
+                        id: pwField
+                        width: parent.width - submitBtn.implicitWidth - eyeBtn.implicitWidth - Style.space(12)
+                        password: !eyeBtn.revealed
+                        placeholderText: "Vault passphrase..."
+                        foreground: root.foreground
+                        font.family: root.fontFamily
+                        enabled: !vaultCard.isThisVaultUnlocking
+
+                        onAccepted: {
+                          if (text.length > 0 && !vaultCard.isThisVaultUnlocking) {
+                            vaultCard.errorMessage = ""
+                            cryptomator.unlockVaultWithPassword(modelData.path, modelData.mountPoint, text)
+                          }
+                        }
+
+                        Keys.onEscapePressed: {
+                          vaultCard.errorMessage = ""
+                          root.activePasswordVault = ""
+                          keyCatcher.forceActiveFocus()
+                        }
+
+                        onVisibleChanged: {
+                          if (visible) {
+                            text = ""
+                            Qt.callLater(function() { pwField.forceActiveFocus() })
+                          }
+                        }
+                      }
+
+                      Button {
+                        id: eyeBtn
+                        property bool revealed: false
+                        iconText: revealed ? "󰈈" : "󰈉"
+                        bordered: true
+                        tooltipText: revealed ? "Hide passphrase" : "Show passphrase"
+                        onClicked: revealed = !revealed
+                      }
+
+                      Button {
+                        id: submitBtn
+                        text: vaultCard.isThisVaultUnlocking ? "Unlocking..." : "Unlock"
+                        iconText: vaultCard.isThisVaultUnlocking ? "󰑐" : "󰌿"
+                        bordered: true
+                        accent: Color.accent
+                        enabled: !vaultCard.isThisVaultUnlocking && pwField.text.length > 0
+                        onClicked: {
+                          if (pwField.text.length > 0) {
+                            vaultCard.errorMessage = ""
+                            cryptomator.unlockVaultWithPassword(modelData.path, modelData.mountPoint, pwField.text)
+                          }
+                        }
+                      }
                     }
 
-                    Button {
-                      visible: modelData.isMounted === true
-                      text: "Lock"
-                      iconText: "󰌾"
-                      bordered: true
-                      tooltipText: "Safely unmount & lock"
-                      onClicked: cryptomator.lockVault(modelData.mountPoint)
-                    }
+                    // Error text if password attempt failed
+                    Row {
+                      visible: vaultCard.errorMessage !== ""
+                      spacing: Style.space(6)
 
-                    Button {
-                      visible: modelData.isMounted !== true
-                      text: "Unlock"
-                      iconText: "󰌿"
-                      bordered: true
-                      accent: Color.accent
-                      tooltipText: "Unlock vault"
-                      onClicked: cryptomator.unlockVault(modelData.path)
+                      Text {
+                        textFormat: Text.PlainText
+                        text: "󰅚"
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        color: root.urgent
+                      }
+
+                      Text {
+                        textFormat: Text.PlainText
+                        text: vaultCard.errorMessage
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        color: root.urgent
+                        elide: Text.ElideRight
+                        width: parent.width - Style.space(24)
+                      }
                     }
                   }
                 }
@@ -434,6 +593,7 @@ Panel {
   onOpenedChanged: if (opened) {
     cryptomator.refresh()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  } else {
+    root.activePasswordVault = ""
   }
 }
-

@@ -17,6 +17,12 @@ Item {
   property bool refreshing: false
   property string lastError: ""
 
+  property bool unlocking: unlockProcess.running
+  property string unlockingVaultPath: ""
+  property string lastUnlockError: ""
+
+  signal unlockFinished(string vaultPath, bool success, string message)
+
   readonly property int refreshIntervalSec: {
     var val = settings ? settings.refreshIntervalSec : 10
     var n = parseInt(String(val), 10)
@@ -29,6 +35,8 @@ Item {
 
   property string _statusOutput: ""
   property string _statusError: ""
+  property string _unlockOutput: ""
+  property string _unlockError: ""
 
   function refresh() {
     if (statusProcess.running) return
@@ -68,6 +76,18 @@ Item {
 
   function unlockVault(vaultPath) {
     runAction("unlock", vaultPath)
+  }
+
+  function unlockVaultWithPassword(vaultPath, mountPoint, password) {
+    if (unlockProcess.running) return false
+    _unlockOutput = ""
+    _unlockError = ""
+    lastUnlockError = ""
+    unlockingVaultPath = vaultPath
+    unlockProcess.secret = password
+    unlockProcess.command = ["python3", actionsScript, "unlock-password", vaultPath, mountPoint || ""]
+    unlockProcess.running = true
+    return true
   }
 
   function revealVault(mountPoint) {
@@ -124,6 +144,48 @@ Item {
       } else {
         root.lastError = err || "Process exited with code " + exitCode
       }
+    }
+  }
+
+  Process {
+    id: unlockProcess
+    running: false
+    property string secret: ""
+    stdinEnabled: true
+    command: []
+
+    stdout: StdioCollector {
+      id: unlockStdout
+      waitForEnd: true
+      onStreamFinished: root._unlockOutput = text
+    }
+    stderr: StdioCollector {
+      id: unlockStderr
+      waitForEnd: true
+      onStreamFinished: root._unlockError = text
+    }
+
+    onStarted: {
+      write(secret + "\n")
+      secret = ""
+    }
+
+    onExited: function(exitCode) {
+      var out = String(unlockStdout.text || root._unlockOutput || "").trim()
+      var err = String(unlockStderr.text || root._unlockError || "").trim()
+      var vPath = root.unlockingVaultPath
+      var success = (exitCode === 0)
+      var msg = success ? (out || "Unlocked successfully") : (err || "Failed to unlock vault")
+
+      if (!success) {
+        root.lastUnlockError = msg
+      } else {
+        root.lastUnlockError = ""
+      }
+
+      root.delayedRefresh.restart()
+      root.unlockFinished(vPath, success, msg)
+      root.unlockingVaultPath = ""
     }
   }
 
