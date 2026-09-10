@@ -514,7 +514,7 @@ Panel {
 
             // ─── EMPTY STATE (no vaults, no form open) ─────────────────────
             Item {
-              visible: cryptomator.totalVaults === 0 && !root.formActive
+              visible: cryptomator.totalVaults === 0 && !root.formActive && !cryptomator.addingVaultProcess && !cryptomator.creatingVaultProcess
               width: parent.width
               implicitHeight: emptyCard.implicitHeight
 

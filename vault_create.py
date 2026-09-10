@@ -11,6 +11,9 @@ Cryptomator vault format v8:
   - d/                     : encrypted data directory
 """
 
+import sys
+sys.dont_write_bytecode = True
+
 import ctypes
 import ctypes.util
 import hashlib

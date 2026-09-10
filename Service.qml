@@ -58,13 +58,17 @@ Item {
   property string _createError: ""
   property string _removeOutput: ""
   property string _removeError: ""
+  property var _refreshCallbacks: []
 
-  function refresh() {
+  function refresh(cb) {
+    if (typeof cb === "function") {
+      _refreshCallbacks.push(cb)
+    }
     if (statusProcess.running) return
     _statusOutput = ""
     _statusError = ""
     refreshing = true
-    statusProcess.command = ["python3", statusScript]
+    statusProcess.command = ["python3", "-B", statusScript]
     statusProcess.running = true
   }
 
@@ -87,7 +91,7 @@ Item {
   }
 
   function runAction(action, arg, arg2) {
-    var cmd = ["python3", actionsScript, action]
+    var cmd = ["python3", "-B", actionsScript, action]
     if (arg && String(arg).trim() !== "") {
       cmd.push(String(arg))
     }
@@ -121,7 +125,7 @@ Item {
     lastUnlockError = ""
     unlockingVaultPath = vaultPath
     unlockProcess.secret = password
-    unlockProcess.command = ["python3", actionsScript, "unlock-password", vaultPath, mountPoint || ""]
+    unlockProcess.command = ["python3", "-B", actionsScript, "unlock-password", vaultPath, mountPoint || ""]
     unlockProcess.running = true
     return true
   }
@@ -151,7 +155,7 @@ Item {
     _addOutput = ""
     _addError = ""
     addingVaultProcess = true
-    var cmd = ["python3", actionsScript, "add-vault", vaultPath]
+    var cmd = ["python3", "-B", actionsScript, "add-vault", vaultPath]
     if (name && String(name).trim() !== "") cmd.push(String(name))
     addProcess.command = cmd
     addProcess.running = true
@@ -163,7 +167,7 @@ Item {
     _removeError = ""
     removingVaultPath = vaultPath
     removingVaultProcess = true
-    removeProcess.command = ["python3", actionsScript, "remove-vault", vaultPath]
+    removeProcess.command = ["python3", "-B", actionsScript, "remove-vault", vaultPath]
     removeProcess.running = true
   }
 
@@ -173,7 +177,7 @@ Item {
     _createError = ""
     creatingVaultProcess = true
     createProcess.secret = password
-    var cmd = ["python3", actionsScript, "create-vault", vaultPath]
+    var cmd = ["python3", "-B", actionsScript, "create-vault", vaultPath]
     if (name && String(name).trim() !== "") cmd.push(String(name))
     createProcess.command = cmd
     createProcess.running = true
@@ -183,7 +187,7 @@ Item {
     if (setupProcess.running) return
     _setupOutput = ""
     _setupError = ""
-    setupProcess.command = ["python3", actionsScript, "setup-bundle"]
+    setupProcess.command = ["python3", "-B", actionsScript, "setup-bundle"]
     setupProcess.running = true
   }
 
@@ -224,6 +228,11 @@ Item {
         root.applyStatus(out)
       } else {
         root.lastError = err || "Process exited with code " + exitCode
+      }
+      var cbs = root._refreshCallbacks.slice()
+      root._refreshCallbacks = []
+      for (var i = 0; i < cbs.length; i++) {
+        try { cbs[i]() } catch (e) { console.error("refresh callback error:", e) }
       }
     }
   }
@@ -327,9 +336,15 @@ Item {
       var out = String(addStdout.text || root._addOutput || "").trim()
       var err = String(addStderr.text || root._addError || "").trim()
       var success = (exitCode === 0)
-      root.addingVaultProcess = false
-      if (success) root.refresh()
-      root.addVaultFinished(success, success ? (out || "Vault registered") : (err || "Failed to add vault"))
+      if (success) {
+        root.refresh(function() {
+          root.addingVaultProcess = false
+          root.addVaultFinished(true, out || "Vault registered")
+        })
+      } else {
+        root.addingVaultProcess = false
+        root.addVaultFinished(false, err || "Failed to add vault")
+      }
     }
   }
 
@@ -360,9 +375,15 @@ Item {
       var out = String(createStdout.text || root._createOutput || "").trim()
       var err = String(createStderr.text || root._createError || "").trim()
       var success = (exitCode === 0)
-      root.creatingVaultProcess = false
-      if (success) root.refresh()
-      root.createVaultFinished(success, success ? (out || "Vault created successfully") : (err || "Failed to create vault"))
+      if (success) {
+        root.refresh(function() {
+          root.creatingVaultProcess = false
+          root.createVaultFinished(true, out || "Vault created successfully")
+        })
+      } else {
+        root.creatingVaultProcess = false
+        root.createVaultFinished(false, err || "Failed to create vault")
+      }
     }
   }
 
@@ -387,7 +408,6 @@ Item {
       var err = String(removeStderr.text || root._removeError || "").trim()
       var success = (exitCode === 0)
       var targetPath = root.removingVaultPath
-      root.removingVaultProcess = false
       root.removingVaultPath = ""
       if (success) {
         var updated = []
@@ -398,9 +418,14 @@ Item {
         }
         root.vaults = updated
         root.totalVaults = updated.length
-        root.refresh()
+        root.refresh(function() {
+          root.removingVaultProcess = false
+          root.removeVaultFinished(true, out || "Vault removed")
+        })
+      } else {
+        root.removingVaultProcess = false
+        root.removeVaultFinished(false, err || "Failed to remove vault")
       }
-      root.removeVaultFinished(success, success ? (out || "Vault removed") : (err || "Failed to remove vault"))
     }
   }
 

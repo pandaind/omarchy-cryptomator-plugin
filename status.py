@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Cryptomator status detection helper for Omarchy shell."""
 
+import sys
+sys.dont_write_bytecode = True
+
 import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 

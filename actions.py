@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Cryptomator action runner for Omarchy shell with bundled cryptomator-cli support."""
 
+import sys
+sys.dont_write_bytecode = True
+
 import hashlib
 import json
 import os
@@ -8,7 +11,6 @@ import platform
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.request
@@ -478,7 +480,11 @@ def get_vaults_file():
                 pass
         plugin_file = Path(__file__).resolve().parent / "vaults.json"
         if plugin_file.exists():
-            return plugin_file
+            try:
+                import shutil
+                shutil.copy2(plugin_file, target_file)
+            except Exception:
+                pass
     return target_file
 
 
