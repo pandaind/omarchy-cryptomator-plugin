@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "pandac.cryptomator",
-  "name": "Cryptomator",
+  "name": "Omarchy Cryptomator Plugin",
   "version": "1.0.0",
   "author": "pandac",
   "license": "MIT",

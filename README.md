@@ -1,4 +1,4 @@
-# Cryptomator Omarchy Plugin
+# Omarchy Cryptomator Plugin
 
 Native Omarchy bar widget and popup panel for [Cryptomator](https://cryptomator.org/).
 
