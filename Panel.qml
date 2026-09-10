@@ -558,13 +558,13 @@ Panel {
                     width: parent.width
                     spacing: Style.space(6)
 
-                    Row {
+                    RowLayout {
                       width: parent.width
                       spacing: Style.space(6)
 
                       TextField {
                         id: pwField
-                        width: parent.width - submitBtn.implicitWidth - eyeBtn.implicitWidth - Style.space(12)
+                        Layout.fillWidth: true
                         password: !eyeBtn.revealed
                         placeholderText: "Vault passphrase..."
                         foreground: root.foreground
@@ -618,8 +618,9 @@ Panel {
                     }
 
                     // Error text if password attempt failed
-                    Row {
+                    RowLayout {
                       visible: vaultCard.errorMessage !== ""
+                      width: parent.width
                       spacing: Style.space(6)
 
                       Text {
@@ -637,7 +638,7 @@ Panel {
                         font.pixelSize: Style.font.caption
                         color: root.urgent
                         elide: Text.ElideRight
-                        width: parent.width - Style.space(24)
+                        Layout.fillWidth: true
                       }
                     }
                   }
