@@ -47,10 +47,22 @@ Panel {
     onTriggered: root.highlightVaultPath = ""
   }
 
-  function resetAddForm()    { addVaultPath = "";    addErrorMsg    = "" }
+  function resetAddForm() {
+    addVaultPath = ""
+    addErrorMsg = ""
+    if (typeof addPathField !== "undefined" && addPathField) addPathField.text = ""
+  }
   function resetCreateForm() {
-    createVaultPath = ""; createVaultName = ""; createVaultPw = ""
-    createVaultPwConfirm = ""; createErrorMsg = ""; createShowPw = false
+    createVaultPath = ""
+    createVaultName = ""
+    createVaultPw = ""
+    createVaultPwConfirm = ""
+    createErrorMsg = ""
+    createShowPw = false
+    if (typeof createPathField !== "undefined" && createPathField) createPathField.text = ""
+    if (typeof createNameField !== "undefined" && createNameField) createNameField.text = ""
+    if (typeof createPwField !== "undefined" && createPwField) createPwField.text = ""
+    if (typeof createPwConfirmField !== "undefined" && createPwConfirmField) createPwConfirmField.text = ""
   }
   function closeForm()       { formMode = ""; resetAddForm(); resetCreateForm() }
 
@@ -426,6 +438,7 @@ Panel {
                       password: !root.createShowPw; font.family: root.fontFamily; foreground: root.foreground
                       onTextChanged: { root.createVaultPw = text; root.createErrorMsg = "" }
                       Keys.onEscapePressed: { root.closeForm(); keyCatcher.forceActiveFocus() }
+                      onVisibleChanged: text = ""
                     }
                     Button {
                       iconText: root.createShowPw ? "󰈈" : "󰈉"; bordered: true
@@ -455,7 +468,7 @@ Panel {
                     onTextChanged: { root.createVaultPwConfirm = text; root.createErrorMsg = "" }
                     Keys.onEscapePressed: { root.closeForm(); keyCatcher.forceActiveFocus() }
                     onAccepted: createVaultBtn.clicked()
-                    onVisibleChanged: { if (visible) text = "" }
+                    onVisibleChanged: text = ""
                   }
 
                   // Mismatch warning
@@ -596,6 +609,7 @@ Panel {
                         vaultCard.recentlyUnlocked = true
                         unlockPulseTimer.restart()
                         root.activePasswordVault = ""
+                        pwField.text = ""
                         keyCatcher.forceActiveFocus()
                       } else {
                         vaultCard.unlockError = msg || "Incorrect password"
@@ -750,6 +764,7 @@ Panel {
                             Keys.onEscapePressed: { vaultCard.unlockError = ""; root.activePasswordVault = ""; keyCatcher.forceActiveFocus() }
                             onVisibleChanged: {
                               if (visible) { text = ""; Qt.callLater(function() { pwField.forceActiveFocus() }) }
+                              else { text = "" }
                             }
                           }
                           Button { id: eyeBtn; property bool revealed: false; iconText: revealed ? "󰈈" : "󰈉"; bordered: true; tooltipText: revealed ? "Hide" : "Show"; onClicked: revealed = !revealed }
@@ -803,6 +818,8 @@ Panel {
 
   onOpenedChanged: {
     if (opened) {
+      root.activePasswordVault = ""
+      root.closeForm()
       cryptomator.refresh()
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     } else {
