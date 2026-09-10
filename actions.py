@@ -12,6 +12,13 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+# Vault creation module (pure Python, no dependencies)
+try:
+    from vault_create import create_vault as _create_vault_impl
+    _VAULT_CREATE_AVAILABLE = True
+except ImportError:
+    _VAULT_CREATE_AVAILABLE = False
+
 
 def find_cryptomator_cli():
     """Locate the bundled or system cryptomator-cli binary."""
@@ -272,8 +279,11 @@ def add_vault(vault_path, display_name=None):
         return False
 
     path_obj = Path(vault_path).expanduser().resolve()
-    if not path_obj.exists() or not path_obj.is_dir():
-        print(f"Directory '{path_obj}' does not exist.", file=sys.stderr)
+    if not path_obj.exists():
+        print(f"Path does not exist: {path_obj}", file=sys.stderr)
+        return False
+    if not path_obj.is_dir():
+        print(f"Path is not a directory: {path_obj}", file=sys.stderr)
         return False
 
     name = display_name or path_obj.name
@@ -315,30 +325,95 @@ def add_vault(vault_path, display_name=None):
 
 
 def remove_vault(vault_path):
-    """Remove a vault from local vaults.json."""
+    """Remove a vault from plugin vaults.json and/or the GUI app settings.json."""
     if not vault_path:
+        print("Vault path required", file=sys.stderr)
         return False
+
     path_obj = Path(vault_path).expanduser().resolve()
+    removed_any = False
+
+    # 1. Remove from plugin's vaults.json
     plugin_dir = Path(__file__).resolve().parent
     vaults_file = plugin_dir / "vaults.json"
-    if not vaults_file.exists():
-        return True
+    if vaults_file.exists():
+        try:
+            with open(vaults_file, "r", encoding="utf-8") as f:
+                vaults = json.load(f)
+            if isinstance(vaults, list):
+                new_vaults = [v for v in vaults if Path(v.get("path", "")).expanduser().resolve() != path_obj]
+                if len(new_vaults) < len(vaults):
+                    with open(vaults_file, "w", encoding="utf-8") as f:
+                        json.dump(new_vaults, f, indent=2)
+                    removed_any = True
+        except Exception as e:
+            print(f"Warning: could not update vaults.json: {e}", file=sys.stderr)
 
-    try:
-        with open(vaults_file, "r", encoding="utf-8") as f:
-            vaults = json.load(f)
-            if not isinstance(vaults, list):
-                vaults = []
-    except Exception:
+    # 2. Remove from GUI app's settings.json (if it exists)
+    settings_candidates = [
+        Path(os.environ.get("XDG_CONFIG_HOME", "")) / "Cryptomator" / "settings.json",
+        Path.home() / ".config" / "Cryptomator" / "settings.json",
+        Path.home() / ".Cryptomator" / "settings.json",
+    ]
+    for settings_file in settings_candidates:
+        if not settings_file.exists():
+            continue
+        try:
+            with open(settings_file, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+            dirs = settings.get("directories", [])
+            if not isinstance(dirs, list):
+                continue
+            new_dirs = [d for d in dirs if Path(d.get("path", "")).expanduser().resolve() != path_obj]
+            if len(new_dirs) < len(dirs):
+                settings["directories"] = new_dirs
+                with open(settings_file, "w", encoding="utf-8") as f:
+                    json.dump(settings, f, indent=2)
+                removed_any = True
+                break
+        except Exception as e:
+            print(f"Warning: could not update settings.json: {e}", file=sys.stderr)
+
+    if not removed_any:
+        print(f"Vault not found in any registry: {path_obj}", file=sys.stderr)
         return False
 
-    new_vaults = [v for v in vaults if Path(v.get("path", "")).expanduser().resolve() != path_obj]
-
-    with open(vaults_file, "w", encoding="utf-8") as f:
-        json.dump(new_vaults, f, indent=2)
-
-    print(f"Removed vault at {path_obj}")
+    print(f"Vault removed successfully")
     return True
+
+
+def create_new_vault(vault_path, password, display_name=None):
+    """Create a brand new Cryptomator vault at vault_path with the given password."""
+    if not vault_path:
+        print("Vault path required", file=sys.stderr)
+        return False
+    if not password:
+        print("Password required to create vault", file=sys.stderr)
+        return False
+
+    if not _VAULT_CREATE_AVAILABLE:
+        print("vault_create module not available", file=sys.stderr)
+        return False
+
+    path_obj = Path(vault_path).expanduser().resolve()
+
+    # Allow creating in an empty or new directory
+    if path_obj.exists() and path_obj.is_dir():
+        contents = list(path_obj.iterdir())
+        if any(f.name in ('masterkey.cryptomator', 'vault.cryptomator') for f in contents):
+            print(f"A Cryptomator vault already exists at {path_obj}", file=sys.stderr)
+            return False
+        if contents:
+            print(f"Directory is not empty: {path_obj}", file=sys.stderr)
+            return False
+
+    result = _create_vault_impl(str(path_obj), password)
+    if not result.get('ok'):
+        print(result.get('error', 'Failed to create vault'), file=sys.stderr)
+        return False
+
+    # Register in vaults.json
+    return add_vault(str(path_obj), display_name)
 
 
 def launch_cryptomator():
@@ -384,6 +459,11 @@ def main():
     elif action == "add-vault":
         name = sys.argv[3] if len(sys.argv) > 3 else None
         if not add_vault(arg, name):
+            sys.exit(1)
+    elif action == "create-vault":
+        name = sys.argv[3] if len(sys.argv) > 3 else None
+        password = sys.stdin.readline().rstrip("\r\n")
+        if not create_new_vault(arg, password, name):
             sys.exit(1)
     elif action == "remove-vault":
         if not remove_vault(arg):

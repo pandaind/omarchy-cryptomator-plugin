@@ -25,9 +25,15 @@ Item {
   property string unlockingVaultPath: ""
   property string lastUnlockError: ""
   property bool settingUpBundle: setupProcess.running
+  property bool addingVaultProcess: false
+  property bool creatingVaultProcess: false
+  property bool removingVaultProcess: false
 
   signal unlockFinished(string vaultPath, bool success, string message)
   signal setupFinished(bool success, string message)
+  signal addVaultFinished(bool success, string message)
+  signal createVaultFinished(bool success, string message)
+  signal removeVaultFinished(bool success, string message)
 
   readonly property int refreshIntervalSec: {
     var val = settings ? settings.refreshIntervalSec : 10
@@ -45,6 +51,12 @@ Item {
   property string _unlockError: ""
   property string _setupOutput: ""
   property string _setupError: ""
+  property string _addOutput: ""
+  property string _addError: ""
+  property string _createOutput: ""
+  property string _createError: ""
+  property string _removeOutput: ""
+  property string _removeError: ""
 
   function refresh() {
     if (statusProcess.running) return
@@ -114,11 +126,35 @@ Item {
   }
 
   function addVault(vaultPath, name) {
-    runAction("add-vault", vaultPath, name || "")
+    if (addingVaultProcess) return
+    _addOutput = ""
+    _addError = ""
+    addingVaultProcess = true
+    var cmd = ["python3", actionsScript, "add-vault", vaultPath]
+    if (name && String(name).trim() !== "") cmd.push(String(name))
+    addProcess.command = cmd
+    addProcess.running = true
   }
 
   function removeVault(vaultPath) {
-    runAction("remove-vault", vaultPath)
+    if (removingVaultProcess) return
+    _removeOutput = ""
+    _removeError = ""
+    removingVaultProcess = true
+    removeProcess.command = ["python3", actionsScript, "remove-vault", vaultPath]
+    removeProcess.running = true
+  }
+
+  function createVault(vaultPath, password, name) {
+    if (creatingVaultProcess) return
+    _createOutput = ""
+    _createError = ""
+    creatingVaultProcess = true
+    createProcess.secret = password
+    var cmd = ["python3", actionsScript, "create-vault", vaultPath]
+    if (name && String(name).trim() !== "") cmd.push(String(name))
+    createProcess.command = cmd
+    createProcess.running = true
   }
 
   function setupBundle() {
@@ -234,6 +270,91 @@ Item {
       var success = (exitCode === 0)
       root.delayedRefresh.restart()
       root.setupFinished(success, success ? (out || "Bundle installed successfully") : (err || "Bundle setup failed"))
+    }
+  }
+
+  Process {
+    id: addProcess
+    running: false
+    command: []
+
+    stdout: StdioCollector {
+      id: addStdout
+      waitForEnd: true
+      onStreamFinished: root._addOutput = text
+    }
+    stderr: StdioCollector {
+      id: addStderr
+      waitForEnd: true
+      onStreamFinished: root._addError = text
+    }
+
+    onExited: function(exitCode) {
+      var out = String(addStdout.text || root._addOutput || "").trim()
+      var err = String(addStderr.text || root._addError || "").trim()
+      var success = (exitCode === 0)
+      root.addingVaultProcess = false
+      if (success) root.delayedRefresh.restart()
+      root.addVaultFinished(success, success ? (out || "Vault registered") : (err || "Failed to add vault"))
+    }
+  }
+
+  Process {
+    id: createProcess
+    running: false
+    stdinEnabled: true
+    property string secret: ""
+    command: []
+
+    stdout: StdioCollector {
+      id: createStdout
+      waitForEnd: true
+      onStreamFinished: root._createOutput = text
+    }
+    stderr: StdioCollector {
+      id: createStderr
+      waitForEnd: true
+      onStreamFinished: root._createError = text
+    }
+
+    onStarted: {
+      write(secret + "\n")
+      secret = ""
+    }
+
+    onExited: function(exitCode) {
+      var out = String(createStdout.text || root._createOutput || "").trim()
+      var err = String(createStderr.text || root._createError || "").trim()
+      var success = (exitCode === 0)
+      root.creatingVaultProcess = false
+      if (success) root.delayedRefresh.restart()
+      root.createVaultFinished(success, success ? (out || "Vault created successfully") : (err || "Failed to create vault"))
+    }
+  }
+
+  Process {
+    id: removeProcess
+    running: false
+    command: []
+
+    stdout: StdioCollector {
+      id: removeStdout
+      waitForEnd: true
+      onStreamFinished: root._removeOutput = text
+    }
+    stderr: StdioCollector {
+      id: removeStderr
+      waitForEnd: true
+      onStreamFinished: root._removeError = text
+    }
+
+    onExited: function(exitCode) {
+      var out = String(removeStdout.text || root._removeOutput || "").trim()
+      var err = String(removeStderr.text || root._removeError || "").trim()
+      var success = (exitCode === 0)
+      root.removingVaultProcess = false
+      if (success) root.delayedRefresh.restart()
+      root.removeVaultFinished(success, success ? (out || "Vault removed") : (err || "Failed to remove vault"))
     }
   }
 
