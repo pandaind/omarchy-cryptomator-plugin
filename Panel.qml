@@ -13,6 +13,9 @@ Panel {
   ipcTarget: "pandac.cryptomator"
   manageIpc: false
 
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
+
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color barForeground: bar ? bar.barForeground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
@@ -46,19 +49,10 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
+    text: cryptomator.unlockedCount > 0 ? "󰌿" : "󰌾"
+    active: cryptomator.unlockedCount > 0
+    activeColor: Color.accent
     tooltipText: Model.summaryText(cryptomator.unlockedCount, cryptomator.totalVaults, cryptomator.installed, cryptomator.running)
-
-    iconComponent: Component {
-      Item {
-        anchors.fill: parent
-        CryptomatorIcon {
-          anchors.centerIn: parent
-          iconSize: Style.space(13)
-          color: root.barIconColor
-          unlocked: cryptomator.unlockedCount > 0
-        }
-      }
-    }
 
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) {
@@ -303,7 +297,7 @@ Panel {
 
                       // Badge
                       BorderSurface {
-                        radius: Style.cornerRadiusSmall
+                        radius: 4
                         color: modelData.isMounted ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.2) : Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.15)
                         leftPadding: Style.space(6)
                         rightPadding: Style.space(6)
@@ -420,3 +414,4 @@ Panel {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 }
+
