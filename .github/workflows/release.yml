@@ -26,7 +26,8 @@ jobs:
               --exclude='.github' \
               --exclude='__pycache__' \
               --exclude='*.pyc' \
-              -czf "${ARCHIVE_NAME}" .
+              -czf "/tmp/${ARCHIVE_NAME}" .
+          mv "/tmp/${ARCHIVE_NAME}" .
           sha256sum "${ARCHIVE_NAME}" > "${ARCHIVE_NAME}.sha256"
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> "$GITHUB_ENV"
 
