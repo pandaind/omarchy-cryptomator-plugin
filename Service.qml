@@ -28,6 +28,7 @@ Item {
   property bool addingVaultProcess: false
   property bool creatingVaultProcess: false
   property bool removingVaultProcess: false
+  property string removingVaultPath: ""
 
   signal unlockFinished(string vaultPath, bool success, string message)
   signal setupFinished(bool success, string message)
@@ -140,6 +141,7 @@ Item {
     if (removingVaultProcess) return
     _removeOutput = ""
     _removeError = ""
+    removingVaultPath = vaultPath
     removingVaultProcess = true
     removeProcess.command = ["python3", actionsScript, "remove-vault", vaultPath]
     removeProcess.running = true
@@ -352,8 +354,20 @@ Item {
       var out = String(removeStdout.text || root._removeOutput || "").trim()
       var err = String(removeStderr.text || root._removeError || "").trim()
       var success = (exitCode === 0)
+      var targetPath = root.removingVaultPath
       root.removingVaultProcess = false
-      if (success) root.delayedRefresh.restart()
+      root.removingVaultPath = ""
+      if (success) {
+        var updated = []
+        for (var i = 0; i < root.vaults.length; i++) {
+          if (root.vaults[i].path !== targetPath) {
+            updated.push(root.vaults[i])
+          }
+        }
+        root.vaults = updated
+        root.totalVaults = updated.length
+        root.refresh()
+      }
       root.removeVaultFinished(success, success ? (out || "Vault removed") : (err || "Failed to remove vault"))
     }
   }

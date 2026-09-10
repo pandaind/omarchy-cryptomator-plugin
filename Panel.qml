@@ -659,7 +659,9 @@ Panel {
                         }
                         Button {
                           visible: !vaultItem.modelData.isMounted
-                          iconText: "󰆴"; bordered: true
+                          iconText: cryptomator.removingVaultPath === vaultItem.modelData.path ? "󰑐" : "󰆴"
+                          enabled: !cryptomator.removingVaultProcess
+                          bordered: true
                           tooltipText: "Remove from list (files are NOT deleted)"
                           onClicked: cryptomator.removeVault(vaultItem.modelData.path)
                         }

@@ -107,10 +107,25 @@ def read_settings():
     return {}
 
 
+def get_vaults_file():
+    """Return path to persistent vaults registry outside the plugin directory.
+    This prevents Quickshell's plugin watcher from triggering a full plugin reload on every edit.
+    """
+    data_dir = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
+    storage_dir = Path(data_dir) / "pandac.cryptomator"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    target_file = storage_dir / "vaults.json"
+
+    if not target_file.exists():
+        plugin_file = Path(__file__).resolve().parent / "vaults.json"
+        if plugin_file.exists():
+            return plugin_file
+    return target_file
+
+
 def read_custom_vaults():
     """Read vaults configured directly in the plugin (standalone)."""
-    plugin_dir = Path(__file__).resolve().parent
-    vaults_file = plugin_dir / "vaults.json"
+    vaults_file = get_vaults_file()
     if vaults_file.exists():
         try:
             with open(vaults_file, "r", encoding="utf-8") as f:
