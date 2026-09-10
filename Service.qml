@@ -302,7 +302,7 @@ Item {
       var out = String(setupStdout.text || root._setupOutput || "").trim()
       var err = String(setupStderr.text || root._setupError || "").trim()
       var success = (exitCode === 0)
-      root.delayedRefresh.restart()
+      if (success) root.refresh()
       root.setupFinished(success, success ? (out || "Bundle installed successfully") : (err || "Bundle setup failed"))
     }
   }
@@ -328,7 +328,7 @@ Item {
       var err = String(addStderr.text || root._addError || "").trim()
       var success = (exitCode === 0)
       root.addingVaultProcess = false
-      if (success) root.delayedRefresh.restart()
+      if (success) root.refresh()
       root.addVaultFinished(success, success ? (out || "Vault registered") : (err || "Failed to add vault"))
     }
   }
@@ -361,7 +361,7 @@ Item {
       var err = String(createStderr.text || root._createError || "").trim()
       var success = (exitCode === 0)
       root.creatingVaultProcess = false
-      if (success) root.delayedRefresh.restart()
+      if (success) root.refresh()
       root.createVaultFinished(success, success ? (out || "Vault created successfully") : (err || "Failed to create vault"))
     }
   }

@@ -39,6 +39,14 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
+  property string highlightVaultPath: ""
+  Timer {
+    id: clearHighlightTimer
+    interval: 3500
+    repeat: false
+    onTriggered: root.highlightVaultPath = ""
+  }
+
   function resetAddForm()    { addVaultPath = "";    addErrorMsg    = "" }
   function resetCreateForm() {
     createVaultPath = ""; createVaultName = ""; createVaultPw = ""
@@ -52,12 +60,24 @@ Panel {
   Connections {
     target: cryptomator
     function onAddVaultFinished(ok, msg) {
-      if (ok) { root.closeForm(); keyCatcher.forceActiveFocus() }
-      else    { root.addErrorMsg = msg || "Failed to register vault" }
+      if (ok) {
+        root.highlightVaultPath = root.addVaultPath.trim()
+        clearHighlightTimer.restart()
+        root.closeForm()
+        Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+      } else {
+        root.addErrorMsg = msg || "Failed to register vault"
+      }
     }
     function onCreateVaultFinished(ok, msg) {
-      if (ok) { root.closeForm(); keyCatcher.forceActiveFocus() }
-      else    { root.createErrorMsg = msg || "Failed to create vault" }
+      if (ok) {
+        root.highlightVaultPath = root.createVaultPath.trim()
+        clearHighlightTimer.restart()
+        root.closeForm()
+        Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+      } else {
+        root.createErrorMsg = msg || "Failed to create vault"
+      }
     }
     function onRemoveVaultFinished(ok, msg) {
       // Always restore focus so the panel doesn't close
@@ -415,7 +435,7 @@ Panel {
                     // Strength dot
                     Rectangle {
                       width: Style.space(8); height: Style.space(8); radius: width / 2
-                      anchors.verticalCenter: parent.verticalCenter
+                      Layout.alignment: Qt.AlignVCenter
                       color: {
                         var pw = root.createVaultPw
                         if (!pw) return root.dim
@@ -546,7 +566,9 @@ Panel {
                     ? (vaultCard.recentlyUnlocked
                         ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.28)
                         : Style.selectedFillFor(root.foreground, Color.accent))
-                    : Style.hoverFillFor(root.foreground, Color.accent)
+                    : (vaultCard.isHighlighted
+                        ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.2)
+                        : Style.hoverFillFor(root.foreground, Color.accent))
 
                   Behavior on color {
                     ColorAnimation { duration: 250 }
@@ -554,6 +576,7 @@ Panel {
 
                   readonly property bool isPrompting: root.activePasswordVault === vaultItem.modelData.path
                   readonly property bool isUnlocking: cryptomator.unlocking && cryptomator.unlockingVaultPath === vaultItem.modelData.path
+                  readonly property bool isHighlighted: root.highlightVaultPath !== "" && (root.highlightVaultPath === vaultItem.modelData.path || root.highlightVaultPath === vaultItem.modelData.name)
                   property string unlockError: ""
                   property bool recentlyUnlocked: false
 
@@ -630,10 +653,10 @@ Panel {
                               radius: 4; anchors.verticalCenter: parent.verticalCenter
                               color: vaultItem.modelData.isMounted
                                 ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, vaultCard.recentlyUnlocked ? 0.35 : 0.2)
-                                : (vaultCard.isUnlocking ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.15) : Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.15))
+                                : (vaultCard.isUnlocking || vaultCard.isHighlighted ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.2) : Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.15))
                               implicitWidth: badgeTxt.implicitWidth + Style.space(10)
                               implicitHeight: badgeTxt.implicitHeight + Style.space(4)
-                              scale: vaultCard.recentlyUnlocked ? 1.08 : 1.0
+                              scale: (vaultCard.recentlyUnlocked || vaultCard.isHighlighted) ? 1.08 : 1.0
                               Behavior on scale {
                                 NumberAnimation { duration: 250; easing.type: Easing.OutBack }
                               }
@@ -642,9 +665,9 @@ Panel {
                               }
                               Text {
                                 id: badgeTxt; anchors.centerIn: parent; textFormat: Text.PlainText
-                                text: vaultCard.isUnlocking ? "UNLOCKING..." : (vaultItem.modelData.isMounted ? (vaultCard.recentlyUnlocked ? "UNLOCKED 󰄬" : "UNLOCKED") : "LOCKED")
+                                text: vaultCard.isUnlocking ? "UNLOCKING..." : (vaultItem.modelData.isMounted ? (vaultCard.recentlyUnlocked ? "UNLOCKED 󰄬" : "UNLOCKED") : (vaultCard.isHighlighted ? "ADDED 󰄬" : "LOCKED"))
                                 font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true
-                                color: vaultItem.modelData.isMounted || vaultCard.isUnlocking ? Color.accent : root.dim
+                                color: vaultItem.modelData.isMounted || vaultCard.isUnlocking || vaultCard.isHighlighted ? Color.accent : root.dim
                               }
                             }
                           }
