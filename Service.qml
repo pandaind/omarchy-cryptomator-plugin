@@ -89,10 +89,6 @@ Item {
     runAction("lock", mountPoint)
   }
 
-  function unlockVault(vaultPath) {
-    runAction("unlock", vaultPath)
-  }
-
   function unlockVaultWithPassword(vaultPath, mountPoint, password) {
     if (unlockProcess.running) return false
     _unlockOutput = ""

@@ -109,11 +109,8 @@ def lock_all():
 
 
 def unlock_vault(vault_path):
-    """Launch Cryptomator GUI if present; otherwise notify user to use inline password."""
-    cryptomator_bin = shutil.which("cryptomator")
-    if cryptomator_bin:
-        return run_detached([cryptomator_bin, vault_path])
-    print("Desktop GUI not installed; please use inline unlock with your password.", file=sys.stderr)
+    """Direct GUI unlock is disabled. Use inline unlock with password via bundled cryptomator-cli."""
+    print("GUI unlock is disabled; using bundled CLI.", file=sys.stderr)
     return False
 
 
@@ -345,10 +342,7 @@ def remove_vault(vault_path):
 
 
 def launch_cryptomator():
-    """Launch Cryptomator GUI or open mount dir if GUI not installed."""
-    cryptomator_bin = shutil.which("cryptomator")
-    if cryptomator_bin:
-        return run_detached([cryptomator_bin])
+    """Reveal Cryptomator mount directory in file manager."""
     data_dir = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     mount_dir = Path(data_dir) / "Cryptomator" / "mnt"
     mount_dir.mkdir(parents=True, exist_ok=True)

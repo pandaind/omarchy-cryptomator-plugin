@@ -108,7 +108,6 @@ Panel {
       onTextKey: function(t) {
         if (t === "r" || t === "R") cryptomator.refresh()
         else if (t === "l" || t === "L") cryptomator.lockAll()
-        else if ((t === "o" || t === "O") && cryptomator.guiInstalled) cryptomator.launchApp()
         else if (t === "a" || t === "A") root.addingVault = !root.addingVault
       }
 
@@ -164,14 +163,6 @@ Panel {
                   iconText: "󰌾"
                   bordered: true
                   onClicked: cryptomator.lockAll()
-                }
-
-                Button {
-                  visible: cryptomator.installed && cryptomator.guiInstalled && cryptomator.unlockedCount === 0
-                  text: "Open App"
-                  iconText: "󰝰"
-                  bordered: true
-                  onClicked: cryptomator.launchApp()
                 }
               }
             }
@@ -548,23 +539,6 @@ Panel {
                       }
 
                       Button {
-                        visible: modelData.isMounted !== true && !vaultCard.isThisVaultPrompting && cryptomator.guiInstalled
-                        iconText: "󰝰"
-                        bordered: true
-                        tooltipText: "Open in Cryptomator GUI"
-                        onClicked: cryptomator.unlockVault(modelData.path)
-                      }
-
-                      Button {
-                        visible: modelData.isMounted !== true && vaultCard.isThisVaultPrompting && cryptomator.guiInstalled
-                        iconText: "󰝰"
-                        text: "GUI"
-                        bordered: true
-                        tooltipText: "Open in Cryptomator GUI instead"
-                        onClicked: cryptomator.unlockVault(modelData.path)
-                      }
-
-                      Button {
                         visible: modelData.isMounted !== true && vaultCard.isThisVaultPrompting
                         iconText: "󰅖"
                         bordered: true
@@ -700,14 +674,6 @@ Panel {
                 text: "Refresh"
                 fontSize: Style.font.bodySmall
                 onClicked: cryptomator.refresh()
-              }
-
-              Button {
-                visible: cryptomator.guiInstalled
-                iconText: "󰝰"
-                text: "Open GUI"
-                fontSize: Style.font.bodySmall
-                onClicked: cryptomator.launchApp()
               }
             }
           }
