@@ -70,11 +70,13 @@ def cleanup_cli_for_mount(mount_point, force=False):
     """Ensure any cryptomator-cli process associated with mount_point terminates."""
     if not mount_point:
         return
+    my_pid = os.getpid()
     try:
         escaped_mount = re.escape(str(mount_point))
-        res = subprocess.run(["pgrep", "-f", f"--mountPoint={escaped_mount}"], capture_output=True, text=True, check=False)
+        pattern = f"cryptomator-cli.*--mountPoint={escaped_mount}"
+        res = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True, check=False)
         if res.returncode == 0:
-            pids = [int(p) for p in res.stdout.split() if p.isdigit()]
+            pids = [int(p) for p in res.stdout.split() if p.isdigit() and int(p) != my_pid]
             for pid in pids:
                 try:
                     os.kill(pid, 15)  # SIGTERM
@@ -95,11 +97,13 @@ def cleanup_cli_for_vault(vault_path, force=False):
     """Ensure any cryptomator-cli process associated with vault_path terminates."""
     if not vault_path:
         return
+    my_pid = os.getpid()
     try:
         escaped_vault = re.escape(str(vault_path))
-        res = subprocess.run(["pgrep", "-f", escaped_vault], capture_output=True, text=True, check=False)
+        pattern = f"cryptomator-cli.*{escaped_vault}"
+        res = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True, check=False)
         if res.returncode == 0:
-            pids = [int(p) for p in res.stdout.split() if p.isdigit()]
+            pids = [int(p) for p in res.stdout.split() if p.isdigit() and int(p) != my_pid]
             for pid in pids:
                 try:
                     os.kill(pid, 15)  # SIGTERM
@@ -427,7 +431,7 @@ def setup_bundle():
         if cfg_file.exists():
             try:
                 cfg_content = cfg_file.read_text(encoding="utf-8")
-                cfg_content = re.sub(r'-Xmx\d+m', '-Xmx96m', cfg_content)
+                cfg_content = re.sub(r'-Xmx\d+m', '-Xmx128m', cfg_content)
                 cfg_file.write_text(cfg_content, encoding="utf-8")
             except Exception:
                 pass
