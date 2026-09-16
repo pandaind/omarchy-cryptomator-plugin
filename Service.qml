@@ -53,6 +53,7 @@ Item {
     if (Quickshell.env("WAYLAND_DISPLAY")) e.push("WAYLAND_DISPLAY=" + Quickshell.env("WAYLAND_DISPLAY"))
     if (Quickshell.env("XDG_RUNTIME_DIR")) e.push("XDG_RUNTIME_DIR=" + Quickshell.env("XDG_RUNTIME_DIR"))
     if (Quickshell.env("DISPLAY")) e.push("DISPLAY=" + Quickshell.env("DISPLAY"))
+    if (Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE")) e.push("HYPRLAND_INSTANCE_SIGNATURE=" + Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE"))
     e.push("/usr/bin/python3", "-B")
     return e
   }

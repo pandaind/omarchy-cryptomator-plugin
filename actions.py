@@ -165,9 +165,25 @@ def close_file_manager_for_mount(mount_point=None, vault_path=None):
     if not targets:
         return
 
+    # Build a minimal env for hyprctl. Under the Quickshell /usr/bin/env -i
+    # sandbox, HYPRLAND_INSTANCE_SIGNATURE is stripped from the process
+    # environment, so hyprctl cannot locate the compositor socket and outputs
+    # nothing. Explicitly forward the vars hyprctl needs.
+    hypr_env = {"PATH": "/usr/bin:/bin"}
+    for key in ("HYPRLAND_INSTANCE_SIGNATURE", "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY"):
+        val = os.environ.get(key)
+        if val:
+            hypr_env[key] = val
+
     try:
-        res = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, check=False)
-        if res.returncode == 0 and res.stdout:
+        res = subprocess.run(
+            ["hyprctl", "clients", "-j"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=hypr_env,
+        )
+        if res.returncode == 0 and res.stdout.strip():
             clients = json.loads(res.stdout)
             fm_classes = {
                 "org.gnome.nautilus", "nautilus", "org.kde.dolphin", "dolphin",
@@ -191,6 +207,7 @@ def close_file_manager_for_mount(mount_point=None, vault_path=None):
                         ["hyprctl", "eval", lua],
                         capture_output=True,
                         check=False,
+                        env=hypr_env,
                     )
     except Exception:
         pass
