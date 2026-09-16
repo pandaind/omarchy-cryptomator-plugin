@@ -26,23 +26,53 @@ except ImportError:
 
 
 def find_cryptomator_cli():
-    """Locate the bundled or local cryptomator-cli binary securely."""
+    """Locate cryptomator-cli for non-password operations (status, lock, reveal).
+
+    Checks bundled vendor/, user-installed bundle, and ~/.local/bin.
+    Do NOT use this for password-bearing operations — use find_trusted_cli().
+    """
     plugin_dir = Path(__file__).resolve().parent
 
-    # 1. Bundled inside the plugin directory
+    # 1. Bundled inside the plugin directory (integrity-verified on setup)
     bundled = plugin_dir / "vendor" / "cryptomator-cli" / "bin" / "cryptomator-cli"
     if bundled.is_file() and os.access(bundled, os.X_OK):
         return str(bundled)
 
-    # 2. In user's local share directory
+    # 2. In user's local share directory (written by setup_bundle after checksum verification)
     user_bundle = Path.home() / ".local" / "share" / "cryptomator-cli" / "bin" / "cryptomator-cli"
     if user_bundle.is_file() and os.access(user_bundle, os.X_OK):
         return str(user_bundle)
 
-    # 3. In ~/.local/bin
+    # 3. In ~/.local/bin (user-controlled; acceptable for non-password ops only)
     local_bin = Path.home() / ".local" / "bin" / "cryptomator-cli"
     if local_bin.is_file() and os.access(local_bin, os.X_OK):
         return str(local_bin)
+
+    return None
+
+
+def find_trusted_cli():
+    """Locate cryptomator-cli for password-bearing operations ONLY.
+
+    Accepts ONLY paths written by setup_bundle() after pinned SHA-256 verification:
+      1. vendor/cryptomator-cli/ inside the plugin directory
+      2. ~/.local/share/cryptomator-cli/ (installer artifact)
+
+    ~/.local/bin and ambient PATH are intentionally excluded: those paths are
+    user-writable and unverified. A rogue binary placed there could capture vault
+    passphrases that are delivered over stdin.
+    """
+    plugin_dir = Path(__file__).resolve().parent
+
+    # 1. Bundled vendor/ — only written by setup_bundle() after SHA-256 verification
+    bundled = plugin_dir / "vendor" / "cryptomator-cli" / "bin" / "cryptomator-cli"
+    if bundled.is_file() and os.access(bundled, os.X_OK):
+        return str(bundled)
+
+    # 2. ~/.local/share/cryptomator-cli/ — also only written by setup_bundle()
+    user_bundle = Path.home() / ".local" / "share" / "cryptomator-cli" / "bin" / "cryptomator-cli"
+    if user_bundle.is_file() and os.access(user_bundle, os.X_OK):
+        return str(user_bundle)
 
     return None
 
@@ -214,7 +244,28 @@ def lock_all():
     status_script = script_dir / "status.py"
     if not status_script.exists():
         return
-    res = subprocess.run([sys.executable, str(status_script)], check=False, capture_output=True, text=True)
+
+    # Use an explicit absolute python3 path and forward only the env vars that
+    # status.py needs. Under the Quickshell /usr/bin/env -i sandbox the inherited
+    # environment is stripped, so without forwarding XDG vars status.py cannot
+    # locate vaults.json and silently returns an empty vault list.
+    python_bin = shutil.which("python3") or "/usr/bin/python3"
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": os.environ.get("HOME", str(Path.home())),
+    }
+    for key in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR"):
+        val = os.environ.get(key)
+        if val:
+            env[key] = val
+
+    res = subprocess.run(
+        [python_bin, "-B", str(status_script)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     if res.returncode != 0:
         return
     try:
@@ -224,7 +275,12 @@ def lock_all():
             if v.get("isMounted"):
                 lock_mount(v.get("mountPoint"), v.get("path"))
         # Force clean any remaining cryptomator-cli processes
-        res_pgrep = subprocess.run(["pgrep", "-f", "cryptomator-cli unlock"], capture_output=True, text=True, check=False)
+        res_pgrep = subprocess.run(
+            ["pgrep", "-f", "cryptomator-cli unlock"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         if res_pgrep.returncode == 0:
             for pid_str in res_pgrep.stdout.split():
                 try:
@@ -251,9 +307,14 @@ def unlock_with_password(vault_path, mount_point, password):
         print("Password cannot be empty", file=sys.stderr)
         return False
 
-    cli = find_cryptomator_cli()
+    cli = find_trusted_cli()
     if not cli:
-        print("cryptomator-cli is not installed or bundled. Run setup-bundle first.", file=sys.stderr)
+        print(
+            "cryptomator-cli bundle not found. Run setup-bundle first to install the "
+            "verified bundle. Only the integrity-verified bundle may be used for "
+            "password-bearing operations.",
+            file=sys.stderr,
+        )
         return False
 
     if not mount_point:
@@ -412,7 +473,7 @@ def setup_bundle():
             for member in zf.infolist():
                 dest = (vendor_dir / member.filename).resolve()
                 if not (dest == resolved_vendor or str(dest).startswith(str(resolved_vendor) + "/")):
-                    raise SecurityError(f"Potential Zip Slip path traversal detected: {member.filename}")
+                    raise ValueError(f"Potential Zip Slip path traversal detected: {member.filename}")
             zf.extractall(vendor_dir)
         zip_path.unlink(missing_ok=True)
 
