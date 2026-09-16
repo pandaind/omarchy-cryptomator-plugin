@@ -200,11 +200,11 @@ def close_file_manager_for_mount(mount_point=None, vault_path=None):
                 is_fm = any(fm in c_class for fm in fm_classes)
                 matches = any(t in c_title or t in c_initial for t in targets)
                 if is_fm and matches:
-                    # Use hyprctl eval with Lua API — hyprctl dispatch does not
-                    # accept Lua expressions and will error on address: syntax
+                    # Use hyprctl dispatch to invoke the Lua dispatcher.
+                    # Note: hyprctl eval evaluates the expression but does not invoke it.
                     lua = f'hl.dsp.window.close({{ window = "address:{addr}" }})'
                     subprocess.run(
-                        ["hyprctl", "eval", lua],
+                        ["hyprctl", "dispatch", lua],
                         capture_output=True,
                         check=False,
                         env=hypr_env,
