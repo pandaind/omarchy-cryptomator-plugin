@@ -26,7 +26,7 @@ except ImportError:
 
 
 def find_cryptomator_cli():
-    """Locate the bundled or system cryptomator-cli binary."""
+    """Locate the bundled or local cryptomator-cli binary securely."""
     plugin_dir = Path(__file__).resolve().parent
 
     # 1. Bundled inside the plugin directory
@@ -39,12 +39,7 @@ def find_cryptomator_cli():
     if user_bundle.is_file() and os.access(user_bundle, os.X_OK):
         return str(user_bundle)
 
-    # 3. In PATH
-    which_cli = shutil.which("cryptomator-cli")
-    if which_cli:
-        return which_cli
-
-    # 4. In ~/.local/bin
+    # 3. In ~/.local/bin
     local_bin = Path.home() / ".local" / "bin" / "cryptomator-cli"
     if local_bin.is_file() and os.access(local_bin, os.X_OK):
         return str(local_bin)

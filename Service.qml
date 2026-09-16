@@ -46,6 +46,17 @@ Item {
   readonly property string statusScript: pluginDir + "/status.py"
   readonly property string actionsScript: pluginDir + "/actions.py"
 
+  property var pythonCmd: {
+    var e = ["/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "HOME=" + Quickshell.env("HOME")]
+    if (Quickshell.env("XDG_DATA_HOME")) e.push("XDG_DATA_HOME=" + Quickshell.env("XDG_DATA_HOME"))
+    if (Quickshell.env("XDG_CONFIG_HOME")) e.push("XDG_CONFIG_HOME=" + Quickshell.env("XDG_CONFIG_HOME"))
+    if (Quickshell.env("WAYLAND_DISPLAY")) e.push("WAYLAND_DISPLAY=" + Quickshell.env("WAYLAND_DISPLAY"))
+    if (Quickshell.env("XDG_RUNTIME_DIR")) e.push("XDG_RUNTIME_DIR=" + Quickshell.env("XDG_RUNTIME_DIR"))
+    if (Quickshell.env("DISPLAY")) e.push("DISPLAY=" + Quickshell.env("DISPLAY"))
+    e.push("/usr/bin/python3", "-B")
+    return e
+  }
+
   property string _statusOutput: ""
   property string _statusError: ""
   property string _unlockOutput: ""
@@ -68,7 +79,7 @@ Item {
     _statusOutput = ""
     _statusError = ""
     refreshing = true
-    statusProcess.command = ["python3", "-B", statusScript]
+    statusProcess.command = pythonCmd.concat([statusScript])
     statusProcess.running = true
   }
 
@@ -91,7 +102,7 @@ Item {
   }
 
   function runAction(action, arg, arg2) {
-    var cmd = ["python3", "-B", actionsScript, action]
+    var cmd = pythonCmd.concat([actionsScript, action])
     if (arg && String(arg).trim() !== "") {
       cmd.push(String(arg))
     }
@@ -125,7 +136,7 @@ Item {
     lastUnlockError = ""
     unlockingVaultPath = vaultPath
     unlockProcess.secret = password
-    unlockProcess.command = ["python3", "-B", actionsScript, "unlock-password", vaultPath, mountPoint || ""]
+    unlockProcess.command = pythonCmd.concat([actionsScript, "unlock-password", vaultPath, mountPoint || ""])
     unlockProcess.running = true
     return true
   }
@@ -155,7 +166,7 @@ Item {
     _addOutput = ""
     _addError = ""
     addingVaultProcess = true
-    var cmd = ["python3", "-B", actionsScript, "add-vault", vaultPath]
+    var cmd = pythonCmd.concat([actionsScript, "add-vault", vaultPath])
     if (name && String(name).trim() !== "") cmd.push(String(name))
     addProcess.command = cmd
     addProcess.running = true
@@ -167,7 +178,7 @@ Item {
     _removeError = ""
     removingVaultPath = vaultPath
     removingVaultProcess = true
-    removeProcess.command = ["python3", "-B", actionsScript, "remove-vault", vaultPath]
+    removeProcess.command = pythonCmd.concat([actionsScript, "remove-vault", vaultPath])
     removeProcess.running = true
   }
 
@@ -177,7 +188,7 @@ Item {
     _createError = ""
     creatingVaultProcess = true
     createProcess.secret = password
-    var cmd = ["python3", "-B", actionsScript, "create-vault", vaultPath]
+    var cmd = pythonCmd.concat([actionsScript, "create-vault", vaultPath])
     if (name && String(name).trim() !== "") cmd.push(String(name))
     createProcess.command = cmd
     createProcess.running = true
@@ -187,7 +198,7 @@ Item {
     if (setupProcess.running) return
     _setupOutput = ""
     _setupError = ""
-    setupProcess.command = ["python3", "-B", actionsScript, "setup-bundle"]
+    setupProcess.command = pythonCmd.concat([actionsScript, "setup-bundle"])
     setupProcess.running = true
   }
 
