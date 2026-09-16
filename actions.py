@@ -150,12 +150,17 @@ def cleanup_cli_for_vault(vault_path, force=False):
 def close_file_manager_for_mount(mount_point=None, vault_path=None):
     """Close any open file manager windows displaying this mount point or vault."""
     targets = set()
-    if mount_point:
-        targets.add(Path(mount_point).name.lower())
-        targets.add(str(mount_point).lower())
-    if vault_path:
-        targets.add(Path(vault_path).name.lower())
-        targets.add(str(vault_path).lower())
+    if mount_point and str(mount_point).strip():
+        mp = str(mount_point).strip()
+        targets.add(Path(mp).name.lower())      # just the folder name (what FM title shows)
+        targets.add(mp.lower())                 # full path (some FMs show it)
+    if vault_path and str(vault_path).strip():
+        vp = str(vault_path).strip()
+        targets.add(Path(vp).name.lower())
+        targets.add(vp.lower())
+
+    # Remove empty strings that would cause false-positive matches on any window
+    targets.discard("")
 
     if not targets:
         return
@@ -166,7 +171,8 @@ def close_file_manager_for_mount(mount_point=None, vault_path=None):
             clients = json.loads(res.stdout)
             fm_classes = {
                 "org.gnome.nautilus", "nautilus", "org.kde.dolphin", "dolphin",
-                "thunar", "nemo", "pcmanfm", "io.elementary.files"
+                "thunar", "nemo", "pcmanfm", "io.elementary.files",
+                "org.gnome.files",  # Nautilus alternate class on some distros
             }
             for c in clients:
                 c_class = str(c.get("class", "")).lower()
@@ -178,8 +184,14 @@ def close_file_manager_for_mount(mount_point=None, vault_path=None):
                 is_fm = any(fm in c_class for fm in fm_classes)
                 matches = any(t in c_title or t in c_initial for t in targets)
                 if is_fm and matches:
-                    cmd_lua = f'hl.dsp.window.close({{ window = "address:{addr}" }})'
-                    subprocess.run(["hyprctl", "dispatch", cmd_lua], capture_output=True, check=False)
+                    # Use hyprctl eval with Lua API — hyprctl dispatch does not
+                    # accept Lua expressions and will error on address: syntax
+                    lua = f'hl.dsp.window.close({{ window = "address:{addr}" }})'
+                    subprocess.run(
+                        ["hyprctl", "eval", lua],
+                        capture_output=True,
+                        check=False,
+                    )
     except Exception:
         pass
 
