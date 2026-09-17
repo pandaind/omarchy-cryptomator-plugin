@@ -150,25 +150,23 @@ def cleanup_cli_for_vault(vault_path, force=False):
 def close_file_manager_for_mount(mount_point=None, vault_path=None):
     """Close any open file manager windows displaying this mount point or vault."""
     targets = set()
-    if mount_point and str(mount_point).strip():
-        mp = str(mount_point).strip()
-        targets.add(Path(mp).name.lower())      # just the folder name (what FM title shows)
-        targets.add(mp.lower())                 # full path (some FMs show it)
-    if vault_path and str(vault_path).strip():
-        vp = str(vault_path).strip()
-        targets.add(Path(vp).name.lower())
-        targets.add(vp.lower())
+    mp_check = None
+    vp_check = None
 
-    # Remove empty strings that would cause false-positive matches on any window
+    if mount_point and str(mount_point).strip():
+        mp_check = str(mount_point).strip()
+        targets.add(Path(mp_check).name.lower())
+        targets.add(mp_check.lower())
+    if vault_path and str(vault_path).strip():
+        vp_check = str(vault_path).strip()
+        targets.add(Path(vp_check).name.lower())
+        targets.add(vp_check.lower())
+
     targets.discard("")
 
-    if not targets:
+    if not targets and not mp_check and not vp_check:
         return
 
-    # Build a minimal env for hyprctl. Under the Quickshell /usr/bin/env -i
-    # sandbox, HYPRLAND_INSTANCE_SIGNATURE is stripped from the process
-    # environment, so hyprctl cannot locate the compositor socket and outputs
-    # nothing. Explicitly forward the vars hyprctl needs.
     hypr_env = {"PATH": "/usr/bin:/bin"}
     for key in ("HYPRLAND_INSTANCE_SIGNATURE", "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY"):
         val = os.environ.get(key)
@@ -188,20 +186,41 @@ def close_file_manager_for_mount(mount_point=None, vault_path=None):
             fm_classes = {
                 "org.gnome.nautilus", "nautilus", "org.kde.dolphin", "dolphin",
                 "thunar", "nemo", "pcmanfm", "io.elementary.files",
-                "org.gnome.files",  # Nautilus alternate class on some distros
+                "org.gnome.files",
             }
             for c in clients:
                 c_class = str(c.get("class", "")).lower()
                 c_title = str(c.get("title", "")).lower()
                 c_initial = str(c.get("initialTitle", "")).lower()
                 addr = c.get("address")
+                pid = c.get("pid")
+                
                 if not addr:
                     continue
+                    
                 is_fm = any(fm in c_class for fm in fm_classes)
+                if not is_fm:
+                    continue
+
+                # 1. Check title matches
                 matches = any(t in c_title or t in c_initial for t in targets)
-                if is_fm and matches:
-                    # Use hyprctl dispatch to invoke the Lua dispatcher.
-                    # Note: hyprctl eval evaluates the expression but does not invoke it.
+                
+                # 2. If title doesn't match, deeply check process open file descriptors
+                # This catches file managers deeply nested inside a vault subfolder
+                if not matches and pid:
+                    fd_dir = f"/proc/{pid}/fd"
+                    if os.path.isdir(fd_dir):
+                        for fd in os.listdir(fd_dir):
+                            try:
+                                target = os.readlink(os.path.join(fd_dir, fd))
+                                if (mp_check and target.startswith(mp_check)) or \
+                                   (vp_check and target.startswith(vp_check)):
+                                    matches = True
+                                    break
+                            except Exception:
+                                pass
+
+                if matches:
                     lua = f'hl.dsp.window.close({{ window = "address:{addr}" }})'
                     subprocess.run(
                         ["hyprctl", "dispatch", lua],
