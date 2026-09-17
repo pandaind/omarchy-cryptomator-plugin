@@ -118,31 +118,30 @@ def setup_bundle():
         zip_path.unlink(missing_ok=True)
         return False
 
-    print("Extracting bundle safely...")
+    print("Extracting bundle into a private staging area...")
+    staging_dir = Path(tempfile.mkdtemp(prefix=".cryptomator-cli-staging-", dir=str(vendor_dir)))
     try:
-        if target_dir.exists():
-            cli_trust.make_tree_writable(target_dir)
-            shutil.rmtree(target_dir)
-
-        resolved_vendor = vendor_dir.resolve()
+        resolved_staging = staging_dir.resolve()
         with zipfile.ZipFile(zip_path, "r") as zf:
             # Zip Slip prevention: check destination for all members
             for member in zf.infolist():
-                dest = (vendor_dir / member.filename).resolve()
-                if not (dest == resolved_vendor or str(dest).startswith(str(resolved_vendor) + "/")):
+                dest = (staging_dir / member.filename).resolve()
+                if not (dest == resolved_staging or str(dest).startswith(str(resolved_staging) + "/")):
                     raise ValueError(f"Potential Zip Slip path traversal detected: {member.filename}")
-            zf.extractall(vendor_dir)
+            zf.extractall(staging_dir)
         zip_path.unlink(missing_ok=True)
 
-        bin_file = target_dir / "bin" / "cryptomator-cli"
+        staged_root = staging_dir / "cryptomator-cli"
+
+        bin_file = staged_root / "bin" / "cryptomator-cli"
         if bin_file.exists():
             bin_file.chmod(bin_file.stat().st_mode | 0o755)
-        launcher = target_dir / "lib" / "libapplauncher.so"
+        launcher = staged_root / "lib" / "libapplauncher.so"
         if launcher.exists():
             launcher.chmod(launcher.stat().st_mode | 0o755)
 
         # Cap memory heap to 128M in cryptomator-cli.cfg to prevent excessive RAM usage
-        cfg_file = target_dir / "lib" / "app" / "cryptomator-cli.cfg"
+        cfg_file = staged_root / "lib" / "app" / "cryptomator-cli.cfg"
         if cfg_file.exists():
             try:
                 cfg_content = cfg_file.read_text(encoding="utf-8")
@@ -151,19 +150,27 @@ def setup_bundle():
             except Exception:
                 pass
 
-        print("Verifying installed bundle identity...")
-        manifest_digest = cli_trust.bundle_manifest_sha256(target_dir)
+        print("Verifying staged bundle identity...")
+        manifest_digest = cli_trust.bundle_manifest_sha256(staged_root)
         if manifest_digest != cli_trust.TRUSTED_BUNDLE_MANIFEST_SHA256[arch]:
             print(
                 "Security error: extracted bundle does not match its pinned, verified "
-                "digest. Removing untrusted install.",
+                "digest. Discarding untrusted staging area.",
                 file=sys.stderr,
             )
-            cli_trust.make_tree_writable(target_dir)
-            shutil.rmtree(target_dir, ignore_errors=True)
             return False
 
-        # Lock the verified bundle read-only so a later same-user write requires an
+        # Publish atomically: swap the verified staged tree into place with a single
+        # rename, so a reader only ever sees either no bundle, the previous verified
+        # bundle, or the new verified bundle -- never a partially-extracted one.
+        # (Renaming a directory needs write permission on the directory itself, not
+        # just its parent, so this must happen before the read-only lockdown below.)
+        if target_dir.exists():
+            cli_trust.make_tree_writable(target_dir)
+            shutil.rmtree(target_dir)
+        os.replace(staged_root, target_dir)
+
+        # Lock the published bundle read-only so a later same-user write requires an
         # explicit permission change first, rather than a plain overwrite.
         cli_trust.lock_down_bundle(target_dir)
 
@@ -172,7 +179,6 @@ def setup_bundle():
     except Exception as e:
         print(f"Extraction failed: {e}", file=sys.stderr)
         zip_path.unlink(missing_ok=True)
-        if target_dir.exists():
-            cli_trust.make_tree_writable(target_dir)
-            shutil.rmtree(target_dir, ignore_errors=True)
         return False
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
