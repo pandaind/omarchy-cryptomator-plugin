@@ -10,32 +10,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-
-def find_cryptomator_cli():
-    """Locate the bundled or system cryptomator-cli binary."""
-    plugin_dir = Path(__file__).resolve().parent
-
-    # 1. Bundled inside the plugin directory
-    bundled = plugin_dir / "vendor" / "cryptomator-cli" / "bin" / "cryptomator-cli"
-    if bundled.is_file() and os.access(bundled, os.X_OK):
-        return str(bundled)
-
-    # 2. In user's local share directory
-    user_bundle = Path.home() / ".local" / "share" / "cryptomator-cli" / "bin" / "cryptomator-cli"
-    if user_bundle.is_file() and os.access(user_bundle, os.X_OK):
-        return str(user_bundle)
-
-    # 3. In PATH
-    which_cli = shutil.which("cryptomator-cli")
-    if which_cli:
-        return which_cli
-
-    # 4. In ~/.local/bin
-    local_bin = Path.home() / ".local" / "bin" / "cryptomator-cli"
-    if local_bin.is_file() and os.access(local_bin, os.X_OK):
-        return str(local_bin)
-
-    return None
+from cli_trust import find_cryptomator_cli
+from vault_registry import get_vaults_file
 
 
 def get_mount_points_dir():
@@ -107,30 +83,6 @@ def read_settings():
             except (OSError, json.JSONDecodeError):
                 continue
     return {}
-
-
-def get_vaults_file():
-    """Return path to persistent vaults registry outside the plugin directory.
-    This prevents Quickshell's plugin watcher from triggering a full plugin reload on every edit.
-    """
-    data_dir = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
-    storage_dir = Path(data_dir) / "omarchy-cryptomator-plugin"
-    storage_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    target_file = storage_dir / "vaults.json"
-
-    if not target_file.exists():
-        legacy_file = Path(data_dir) / "pandac.cryptomator" / "vaults.json"
-        if legacy_file.exists():
-            import shutil
-            try:
-                shutil.copy2(legacy_file, target_file)
-                return target_file
-            except Exception:
-                pass
-        plugin_file = Path(__file__).resolve().parent / "vaults.json"
-        if plugin_file.exists():
-            return plugin_file
-    return target_file
 
 
 def read_custom_vaults():
