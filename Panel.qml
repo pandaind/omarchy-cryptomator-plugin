@@ -202,7 +202,7 @@ Panel {
                 spacing: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
                 Button {
-                  visible: !cryptomator.installed
+                  visible: !cryptomator.isBundled
                   text: cryptomator.settingUpBundle ? "Downloading..." : "Setup CLI"
                   iconText: "󰉍"; bordered: true; enabled: !cryptomator.settingUpBundle
                   onClicked: cryptomator.setupBundle()
@@ -218,9 +218,14 @@ Panel {
 
           PanelSeparator { foreground: root.foreground }
 
-          // ═══════════════════════════════════════════ CLI NOT INSTALLED
+          // ═══════════════════════════════════════════ VERIFIED BUNDLE NOT INSTALLED
+          // Gated on isBundled, not installed: unlocking only ever trusts this
+          // plugin's own verified bundle, so this must show even for a user who
+          // already has the Cryptomator GUI or a system cryptomator-cli — those
+          // are surfaced elsewhere (see the CLI status text) but can't unlock a
+          // vault through this plugin on their own.
           Item {
-            visible: !cryptomator.installed
+            visible: !cryptomator.isBundled
             width: parent.width
             implicitHeight: notInstalledCard.implicitHeight
 
@@ -240,13 +245,16 @@ Panel {
                 spacing: Style.space(8)
 
                 Text {
-                  textFormat: Text.PlainText; text: "Cryptomator CLI Not Installed"
+                  textFormat: Text.PlainText
+                  text: cryptomator.installed ? "Secure CLI Bundle Required" : "Cryptomator CLI Not Installed"
                   font.bold: true; font.family: root.fontFamily; font.pixelSize: Style.font.body
                   color: root.foreground
                 }
                 Text {
                   textFormat: Text.PlainText; width: parent.width; wrapMode: Text.WordWrap
-                  text: "Download the official headless CLI bundle — no desktop app required."
+                  text: cryptomator.installed
+                    ? "Vault unlocking only trusts this plugin's own verified CLI bundle, even though Cryptomator is already installed on your system. Install it below to unlock vaults."
+                    : "Download the official headless CLI bundle — no desktop app required."
                   font.family: root.fontFamily; font.pixelSize: Style.font.caption; color: root.dim
                 }
                 Button {
