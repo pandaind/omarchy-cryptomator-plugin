@@ -67,6 +67,10 @@ def lock_mount(mount_point, vault_path=None):
     if vault_path:
         process_utils.cleanup_cli_for_vault(vault_path, force=True)
 
+    # Opportunistically mop up any per-unlock bundle snapshots (see
+    # cli_trust.open_trusted_cli_for_exec) whose scheduled cleanup never ran.
+    cli_trust.sweep_stale_run_dirs(Path(__file__).resolve().parent / "vendor")
+
     # Re-verify if unmounted from /proc/mounts
     try:
         with open("/proc/mounts", "r", encoding="utf-8") as f:
@@ -135,7 +139,7 @@ def unlock_with_password(vault_path, mount_point, password):
         print("Password cannot be empty", file=sys.stderr)
         return False
 
-    cli_fd, cli_result = cli_trust.open_trusted_cli_for_exec()
+    cli_fd, cli_result, snapshot_dir = cli_trust.open_trusted_cli_for_exec()
     if cli_fd is None:
         print(cli_result, file=sys.stderr)
         return False
@@ -144,6 +148,11 @@ def unlock_with_password(vault_path, mount_point, password):
         return _run_unlock(vault_path, mount_point, password, cli_fd)
     finally:
         os.close(cli_fd)
+        # The launched cryptomator-cli process keeps running (and reading from
+        # snapshot_dir) for as long as the vault stays mounted, well past this
+        # function returning, so the snapshot can't be removed here -- schedule its
+        # removal in the background instead (see cli_trust.schedule_run_dir_cleanup).
+        cli_trust.schedule_run_dir_cleanup(snapshot_dir)
 
 
 def _run_unlock(vault_path, mount_point, password, cli_fd):
