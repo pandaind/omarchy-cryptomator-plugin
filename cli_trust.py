@@ -154,11 +154,18 @@ def _open_verified_binary(path: Path, expected_sha256: str):
             os.close(fd)
 
 
-def _copy_tree_no_symlinks(src: Path, dst: Path):
-    """Copy every regular file under src into dst, preserving relative paths and
-    permission bits. Refuses to touch any symlink found anywhere in the tree, since a
-    symlink could otherwise alias content outside the verified bundle and defeat the
-    point of hashing the copy afterward."""
+def _copy_and_hash_tree(src: Path, dst: Path) -> str:
+    """Copy every regular file under src into dst, hashing each file's content as it is
+    written so the returned manifest digest reflects exactly the bytes that landed in
+    dst -- without a second full read of the tree just to verify it (this bundle is
+    tens of MB, and unlocking a vault does this on every attempt, so halving the I/O
+    here matters for how long the caller's mount-wait timeout budget has left).
+
+    Refuses to touch any symlink found anywhere in the tree, since a symlink could
+    otherwise alias content outside the verified bundle and defeat the point of hashing
+    the copy afterward.
+    """
+    entries = []
     for p in sorted(src.rglob("*")):
         rel = p.relative_to(src)
         if p.is_symlink():
@@ -168,8 +175,18 @@ def _copy_tree_no_symlinks(src: Path, dst: Path):
             dest.mkdir(parents=True, exist_ok=True)
         elif p.is_file():
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(p, dest)
+            hasher = hashlib.sha256()
+            with open(p, "rb") as src_f, open(dest, "wb") as dst_f:
+                while chunk := src_f.read(1024 * 1024):
+                    hasher.update(chunk)
+                    dst_f.write(chunk)
             shutil.copymode(p, dest)
+            entries.append((rel.as_posix(), hasher.hexdigest()))
+
+    manifest = hashlib.sha256()
+    for rel_str, digest in sorted(entries):
+        manifest.update(rel_str.encode("utf-8") + b"\0" + digest.encode("ascii") + b"\n")
+    return manifest.hexdigest()
 
 
 _CLEANUP_SCRIPT = (
@@ -215,13 +232,31 @@ def schedule_run_dir_cleanup(path: Path, delay_seconds: float = RUN_DIR_CLEANUP_
         pass
 
 
-def sweep_stale_run_dirs(vendor_dir: Path, max_age_seconds: float = RUN_DIR_STALE_AGE_SECONDS):
+def run_dir_root() -> Path:
+    """Base directory for per-unlock bundle snapshots (see open_trusted_cli_for_exec).
+
+    Deliberately outside the plugin's own directory tree. Omarchy's shell watches
+    locally-linked plugin directories and reloads the whole plugin the moment any file
+    under them changes -- writing a snapshot's files there triggered a reload storm that
+    tore down the in-flight unlock's Process (and the panel with it) mid-copy, which is
+    what made the first unlock attempt after this snapshot scheme was added appear to
+    fail every time. XDG_RUNTIME_DIR is a per-session tmpfs outside any watched config
+    or plugin tree, and is already private to this user.
+    """
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    base = Path(runtime_dir) if runtime_dir else Path(tempfile.gettempdir()) / f"omarchy-cryptomator-plugin-{os.getuid()}"
+    root = base / "omarchy-cryptomator-plugin"
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return root
+
+
+def sweep_stale_run_dirs(base_dir: Path, max_age_seconds: float = RUN_DIR_STALE_AGE_SECONDS):
     """Best-effort garbage collection for per-unlock snapshot directories that outlived
     their scheduled cleanup (e.g. the cleanup process was killed along with the user's
     session). Only removes directories older than max_age_seconds, which is chosen to
     be far longer than any realistic unlock needs its snapshot for."""
     try:
-        candidates = list(vendor_dir.glob(".cryptomator-cli-run-*"))
+        candidates = list(base_dir.glob("cryptomator-cli-run-*"))
     except OSError:
         return
     now = time.time()
@@ -290,7 +325,6 @@ def open_trusted_cli_for_exec():
     removal with schedule_run_dir_cleanup() instead.
     """
     bundle_root = _plugin_dir() / "vendor" / "cryptomator-cli"
-    vendor_dir = bundle_root.parent
 
     arch = detect_arch()
     if not arch or arch not in TRUSTED_BUNDLE_MANIFEST_SHA256:
@@ -303,9 +337,10 @@ def open_trusted_cli_for_exec():
             "password-bearing operations."
         ), None
 
-    sweep_stale_run_dirs(vendor_dir)
+    run_root = run_dir_root()
+    sweep_stale_run_dirs(run_root)
 
-    staging_root = Path(tempfile.mkdtemp(prefix=".cryptomator-cli-run-", dir=str(vendor_dir)))
+    staging_root = Path(tempfile.mkdtemp(prefix="cryptomator-cli-run-", dir=str(run_root)))
 
     def _fail(message):
         make_tree_writable(staging_root)
@@ -313,14 +348,9 @@ def open_trusted_cli_for_exec():
         return None, message, None
 
     try:
-        _copy_tree_no_symlinks(bundle_root, staging_root)
+        manifest_digest = _copy_and_hash_tree(bundle_root, staging_root)
     except (OSError, ValueError) as err:
         return _fail(f"Failed to snapshot cryptomator-cli bundle for verification: {err}")
-
-    try:
-        manifest_digest = bundle_manifest_sha256(staging_root)
-    except OSError as err:
-        return _fail(f"Failed to verify cryptomator-cli bundle snapshot: {err}")
 
     if manifest_digest != TRUSTED_BUNDLE_MANIFEST_SHA256[arch]:
         return _fail(

@@ -22,6 +22,13 @@ import cli_trust
 import file_manager
 import process_utils
 
+# How long to wait for a password-correct unlock to actually finish mounting before
+# giving up. Needs headroom for a cold JVM start plus, since open_trusted_cli_for_exec
+# now snapshots and re-verifies the whole bundle on every attempt, that snapshot step
+# itself -- a too-tight budget here would report a slow-but-genuine unlock as a timeout
+# failure, even though the mount completes moments later.
+MOUNT_WAIT_TIMEOUT_SECONDS = 20.0
+
 
 def lock_mount(mount_point, vault_path=None):
     """Unmount/lock a specific mount point using fusermount3, forcing lazy unmount if busy."""
@@ -69,7 +76,7 @@ def lock_mount(mount_point, vault_path=None):
 
     # Opportunistically mop up any per-unlock bundle snapshots (see
     # cli_trust.open_trusted_cli_for_exec) whose scheduled cleanup never ran.
-    cli_trust.sweep_stale_run_dirs(Path(__file__).resolve().parent / "vendor")
+    cli_trust.sweep_stale_run_dirs(cli_trust.run_dir_root())
 
     # Re-verify if unmounted from /proc/mounts
     try:
@@ -215,7 +222,7 @@ def _run_unlock(vault_path, mount_point, password, cli_fd):
 
     # Poll for success or failure
     start_time = time.time()
-    while time.time() - start_time < 8.0:
+    while time.time() - start_time < MOUNT_WAIT_TIMEOUT_SECONDS:
         ret = proc.poll()
         if ret is not None:
             err_msg = "Incorrect password"
