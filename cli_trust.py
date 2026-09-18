@@ -21,13 +21,13 @@ import tempfile
 import time
 from pathlib import Path
 
-# How long a per-unlock bundle snapshot (see open_trusted_cli_for_exec) is left alone
-# before the background cleanup process removes it. Must comfortably outlast JVM
-# bootstrap and initial classloading, since those are the file accesses that actually
-# need the snapshot; anything reached only much later would just fail to load rather
-# than pose a security risk. A stale-directory sweep with a much longer threshold acts
-# as a safety net if the cleanup process itself never got to run.
-RUN_DIR_CLEANUP_DELAY_SECONDS = 45
+# Safety ceiling for the background cleanup process (see schedule_run_dir_cleanup): it
+# normally removes a per-unlock snapshot the moment the process using it exits, however
+# long that takes, but if that process's pid gets reused by something unrelated before
+# we ever see it exit, this bounds how long the snapshot can be kept alive by mistake.
+# A stale-directory sweep with a similar threshold acts as a second safety net for
+# snapshots whose cleanup process didn't survive at all (e.g. killed with the session).
+RUN_DIR_MAX_WAIT_SECONDS = 24 * 60 * 60
 RUN_DIR_STALE_AGE_SECONDS = 600
 
 # SHA-256 of the official release archive, from Cryptomator's published checksums.
@@ -191,8 +191,14 @@ def _copy_and_hash_tree(src: Path, dst: Path) -> str:
 
 _CLEANUP_SCRIPT = (
     "import os, shutil, stat, sys, time\n"
-    "time.sleep(float(sys.argv[2]))\n"
-    "root = sys.argv[1]\n"
+    "root, pid, max_wait = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])\n"
+    "deadline = time.monotonic() + max_wait\n"
+    "while time.monotonic() < deadline:\n"
+    "    try:\n"
+    "        os.kill(pid, 0)\n"
+    "    except OSError:\n"
+    "        break\n"
+    "    time.sleep(1)\n"
     "for dirpath, dirnames, filenames in os.walk(root):\n"
     "    for name in dirnames + filenames:\n"
     "        p = os.path.join(dirpath, name)\n"
@@ -208,20 +214,34 @@ _CLEANUP_SCRIPT = (
 )
 
 
-def schedule_run_dir_cleanup(path: Path, delay_seconds: float = RUN_DIR_CLEANUP_DELAY_SECONDS):
-    """Spawn a detached process that removes a per-unlock bundle snapshot after a delay.
+def cleanup_run_dir_now(path: Path):
+    """Synchronously remove a per-unlock snapshot that was never handed to a running
+    process -- e.g. the vault turned out to already be mounted, or launching
+    cryptomator-cli failed before it started. Nothing else can be using it, so there's
+    no reason to defer this to the background cleanup process."""
+    make_tree_writable(path)
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def schedule_run_dir_cleanup(path: Path, wait_for_pid: int, max_wait_seconds: float = RUN_DIR_MAX_WAIT_SECONDS):
+    """Spawn a detached process that removes a per-unlock bundle snapshot once the
+    process using it (wait_for_pid, e.g. the cryptomator-cli launcher) exits.
 
     The snapshot must outlive the short-lived Python process that created it (that
     process returns almost immediately after starting cryptomator-cli, while the
     launched process keeps running for as long as the vault stays mounted), so cleanup
     can't happen in a normal try/finally here -- it has to survive this process exiting.
-    Uses argv rather than a shell string to pass the path, so there's nothing to quote
-    or inject even though the path is not attacker-influenced.
+    Waiting on the actual pid rather than a guessed delay means cleanup happens exactly
+    when it's safe to, whether that's seconds or hours later, with max_wait_seconds only
+    as a ceiling against wait_for_pid being reused by an unrelated process before we
+    observe it exit. Resolves the interpreter via sys.executable rather than searching
+    PATH, and passes the path via argv rather than a shell string, so nothing here is
+    resolved or built from anything a same-uid attacker could redirect.
     """
-    python_bin = os.environ.get("PYTHON") or shutil.which("python3") or "/usr/bin/python3"
+    python_bin = sys.executable or "/usr/bin/python3"
     try:
         subprocess.Popen(
-            [python_bin, "-c", _CLEANUP_SCRIPT, str(path), str(delay_seconds)],
+            [python_bin, "-c", _CLEANUP_SCRIPT, str(path), str(wait_for_pid), str(max_wait_seconds)],
             start_new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

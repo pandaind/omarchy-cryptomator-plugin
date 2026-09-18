@@ -152,21 +152,18 @@ def unlock_with_password(vault_path, mount_point, password):
         return False
 
     try:
-        return _run_unlock(vault_path, mount_point, password, cli_fd)
+        return _run_unlock(vault_path, mount_point, password, cli_fd, snapshot_dir)
     finally:
         os.close(cli_fd)
-        # The launched cryptomator-cli process keeps running (and reading from
-        # snapshot_dir) for as long as the vault stays mounted, well past this
-        # function returning, so the snapshot can't be removed here -- schedule its
-        # removal in the background instead (see cli_trust.schedule_run_dir_cleanup).
-        cli_trust.schedule_run_dir_cleanup(snapshot_dir)
 
 
-def _run_unlock(vault_path, mount_point, password, cli_fd):
+def _run_unlock(vault_path, mount_point, password, cli_fd, snapshot_dir):
     """Drive the actual unlock subprocess. cli_fd must be an already-verified, open
     file descriptor for the cryptomator-cli launcher (see cli_trust.open_trusted_cli_for_exec);
     it is executed via /proc/self/fd so the verified inode, not a path lookup, is what
-    actually runs."""
+    actually runs. snapshot_dir is the private bundle snapshot cli_fd was opened from;
+    this function is responsible for either cleaning it up immediately (if it never gets
+    used) or scheduling its removal once the process reading it exits."""
     if not mount_point:
         vault_name = Path(vault_path).name
         data_dir = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
@@ -176,6 +173,7 @@ def _run_unlock(vault_path, mount_point, password, cli_fd):
 
     if os.path.ismount(mount_point):
         print(f"Vault is already mounted at {mount_point}")
+        cli_trust.cleanup_run_dir_now(snapshot_dir)
         return True
 
     # Ensure any stale or lingering process for this mount or vault is terminated
@@ -202,23 +200,30 @@ def _run_unlock(vault_path, mount_point, password, cli_fd):
         vault_path,
     ]
 
+    proc = None
     try:
-        with open(log_fd, "w", encoding="utf-8", closefd=True) as log_f:
-            proc = subprocess.Popen(
-                cmd,
-                executable=f"/proc/self/fd/{cli_fd}",
-                pass_fds=(cli_fd,),
-                stdin=subprocess.PIPE,
-                stdout=log_f,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-            proc.stdin.write((password + "\n").encode("utf-8"))
-            proc.stdin.flush()
-            proc.stdin.close()
-    except Exception as err:
-        print(f"Failed to start unlock process: {err}", file=sys.stderr)
-        return False
+        try:
+            with open(log_fd, "w", encoding="utf-8", closefd=True) as log_f:
+                proc = subprocess.Popen(
+                    cmd,
+                    executable=f"/proc/self/fd/{cli_fd}",
+                    pass_fds=(cli_fd,),
+                    stdin=subprocess.PIPE,
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                proc.stdin.write((password + "\n").encode("utf-8"))
+                proc.stdin.flush()
+                proc.stdin.close()
+        except Exception as err:
+            print(f"Failed to start unlock process: {err}", file=sys.stderr)
+            return False
+    finally:
+        if proc is not None:
+            cli_trust.schedule_run_dir_cleanup(snapshot_dir, proc.pid)
+        else:
+            cli_trust.cleanup_run_dir_now(snapshot_dir)
 
     # Poll for success or failure
     start_time = time.time()
