@@ -100,20 +100,27 @@ def make_tree_writable(root: Path):
 
 
 def lock_down_bundle(root: Path):
-    """Strip write permissions across a verified bundle so that tampering with any
-    file requires an explicit permission change first, rather than a plain overwrite."""
+    """Strip write permissions from every file in a verified bundle, so that
+    overwriting any file *in place* requires an explicit permission change first,
+    rather than a plain write().
+
+    Deliberately leaves directories writable (their normal, extracted permissions).
+    Locking directories down too used to additionally block *replacing* a file (delete
+    + recreate under the same name), but that gains a same-uid attacker nothing: the
+    per-unlock manifest-digest check in open_trusted_cli_for_exec() re-hashes whatever
+    is actually installed from scratch on every single unlock, regardless of at-rest
+    permissions, so a swapped-in file is still caught before any passphrase is sent
+    either way. What locked directories broke instead was ordinary removal -- deleting
+    a file requires write permission on its *parent directory*, not on the file, so a
+    read-only tree made `rm -rf`, and hence a normal plugin uninstall, fail with a wall
+    of "Permission denied" errors that the user would then have to fix by hand.
+    """
     for p in root.rglob("*"):
         try:
-            if p.is_dir():
-                p.chmod(0o555)
-            elif p.is_file():
+            if p.is_file():
                 p.chmod(0o555 if os.access(p, os.X_OK) else 0o444)
         except OSError:
             pass
-    try:
-        root.chmod(0o555)
-    except OSError:
-        pass
 
 
 def _open_verified_binary(path: Path, expected_sha256: str):
