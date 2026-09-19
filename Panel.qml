@@ -202,12 +202,6 @@ Panel {
                 spacing: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
                 Button {
-                  visible: !cryptomator.isBundled
-                  text: cryptomator.settingUpBundle ? "Downloading..." : "Setup CLI"
-                  iconText: "󰉍"; bordered: true; enabled: !cryptomator.settingUpBundle
-                  onClicked: cryptomator.setupBundle()
-                }
-                Button {
                   visible: cryptomator.installed && cryptomator.unlockedCount > 0
                   text: "Lock All"; iconText: "󰌾"; bordered: true
                   onClicked: cryptomator.lockAll()
