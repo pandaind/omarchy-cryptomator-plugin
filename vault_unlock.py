@@ -95,11 +95,14 @@ def lock_all():
     if not status_script.exists():
         return
 
-    # Use an explicit absolute python3 path and forward only the env vars that
-    # status.py needs. Under the Quickshell /usr/bin/env -i sandbox the inherited
-    # environment is stripped, so without forwarding XDG vars status.py cannot
-    # locate vaults.json and silently returns an empty vault list.
-    python_bin = shutil.which("python3") or "/usr/bin/python3"
+    # Forward only the env vars that status.py needs. Under the Quickshell
+    # /usr/bin/env -i sandbox the inherited environment is stripped, so without
+    # forwarding XDG vars status.py cannot locate vaults.json and silently returns an
+    # empty vault list. Uses sys.executable rather than resolving python3 via PATH, for
+    # the same reason as everywhere else this codebase spawns a Python subprocess: an
+    # ambient-PATH lookup is same-uid-attacker-redirectable, while sys.executable is
+    # the interpreter already running this code.
+    python_bin = sys.executable or "/usr/bin/python3"
     env = {
         "PATH": "/usr/bin:/bin",
         "HOME": os.environ.get("HOME", str(Path.home())),
