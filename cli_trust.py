@@ -270,6 +270,28 @@ def run_dir_root() -> Path:
     return root
 
 
+def install_staging_root() -> Path:
+    """Base directory for downloading and staging a new cryptomator-cli bundle before
+    it's published into vendor/cryptomator-cli/ (see setup_bundle in bundle_installer.py).
+
+    Deliberately outside the plugin's own directory tree, for the same reason as
+    run_dir_root(): Omarchy's shell watches locally-linked plugin directories and
+    reloads the whole plugin -- tearing down the in-flight install Process (and the
+    panel) along with it -- the instant any file under them changes. Downloading and
+    extracting a bundle's hundreds of files directly into vendor/ triggers exactly that
+    storm. Unlike run_dir_root() (XDG_RUNTIME_DIR, a tmpfs that's commonly a different
+    filesystem from the plugin's own), this lives under the user's cache directory,
+    which is normally on the same filesystem as the plugin -- letting the final publish
+    step move the verified result into place with a single rename instead of a
+    file-by-file copy into the watched tree.
+    """
+    cache_dir = os.environ.get("XDG_CACHE_HOME")
+    base = Path(cache_dir) if cache_dir else Path.home() / ".cache"
+    root = base / "omarchy-cryptomator-plugin" / "install-staging"
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return root
+
+
 def sweep_stale_run_dirs(base_dir: Path, max_age_seconds: float = RUN_DIR_STALE_AGE_SECONDS):
     """Best-effort garbage collection for per-unlock snapshot directories that outlived
     their scheduled cleanup (e.g. the cleanup process was killed along with the user's

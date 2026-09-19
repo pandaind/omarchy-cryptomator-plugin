@@ -94,10 +94,15 @@ def setup_bundle():
     vendor_dir.mkdir(parents=True, exist_ok=True)
     target_dir = vendor_dir / "cryptomator-cli"
 
+    # Download and extract outside the plugin's own (watched) directory tree -- see
+    # cli_trust.install_staging_root() for why. vendor_dir is only ever touched by the
+    # single publish move below, once everything has already been verified.
+    staging_root = cli_trust.install_staging_root()
+
     print(f"Downloading cryptomator-cli {VERSION} from {url}...")
     try:
         zip_path = _download_bounded(
-            url, vendor_dir, MAX_DOWNLOAD_BYTES, DOWNLOAD_SOCKET_TIMEOUT, DOWNLOAD_TOTAL_TIMEOUT
+            url, staging_root, MAX_DOWNLOAD_BYTES, DOWNLOAD_SOCKET_TIMEOUT, DOWNLOAD_TOTAL_TIMEOUT
         )
     except Exception as e:
         print(f"Download failed: {e}", file=sys.stderr)
@@ -119,7 +124,7 @@ def setup_bundle():
         return False
 
     print("Extracting bundle into a private staging area...")
-    staging_dir = Path(tempfile.mkdtemp(prefix=".cryptomator-cli-staging-", dir=str(vendor_dir)))
+    staging_dir = Path(tempfile.mkdtemp(prefix=".cryptomator-cli-staging-", dir=str(staging_root)))
     try:
         resolved_staging = staging_dir.resolve()
         with zipfile.ZipFile(zip_path, "r") as zf:
@@ -162,13 +167,17 @@ def setup_bundle():
 
         # Publish atomically: swap the verified staged tree into place with a single
         # rename, so a reader only ever sees either no bundle, the previous verified
-        # bundle, or the new verified bundle -- never a partially-extracted one.
-        # (Renaming a directory needs write permission on the directory itself, not
-        # just its parent, so this must happen before the read-only lockdown below.)
+        # bundle, or the new verified bundle -- never a partially-extracted one, and so
+        # the watched plugin tree sees exactly one filesystem change instead of a
+        # storm of them from a file-by-file copy. (Renaming a directory needs write
+        # permission on the directory itself, not just its parent, so this must happen
+        # before the read-only lockdown below.) shutil.move uses a plain rename when
+        # staging_root and vendor_dir share a filesystem (the common case, since both
+        # are normally under $HOME) and only falls back to a file-by-file copy if not.
         if target_dir.exists():
             cli_trust.make_tree_writable(target_dir)
             shutil.rmtree(target_dir)
-        os.replace(staged_root, target_dir)
+        shutil.move(str(staged_root), str(target_dir))
 
         # Lock the published bundle read-only so a later same-user write requires an
         # explicit permission change first, rather than a plain overwrite.
