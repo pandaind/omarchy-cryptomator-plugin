@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from cli_trust import find_cryptomator_cli
+from cli_trust import bundle_install_root, find_cryptomator_cli
 from vault_registry import get_vaults_file
 
 
@@ -105,7 +105,7 @@ def main():
 
     cli_installed = (cli_path is not None)
     gui_installed = (gui_path is not None)
-    is_bundled = bool(cli_path and "vendor/cryptomator-cli" in cli_path)
+    is_bundled = bool(cli_path and cli_path == str(bundle_install_root() / "bin" / "cryptomator-cli"))
 
     # Installed if CLI is available (GUI is optional)
     installed = cli_installed or gui_installed

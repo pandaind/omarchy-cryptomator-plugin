@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Downloads and installs the verified cryptomator-cli bundle into vendor/."""
+"""Downloads and installs the verified cryptomator-cli bundle (see cli_trust.bundle_install_root)."""
 
 import sys
 sys.dont_write_bytecode = True
@@ -77,8 +77,9 @@ def _download_bounded(url: str, dest_dir: Path, max_bytes: int, socket_timeout: 
 
 
 def setup_bundle():
-    """Download and extract the official cryptomator-cli into vendor/, verifying its
-    identity both as a whole archive and, afterward, as an installed bundle tree."""
+    """Download and extract the official cryptomator-cli into the verified install
+    location (see cli_trust.bundle_install_root), verifying its identity both as a
+    whole archive and, afterward, as an installed bundle tree."""
     arch = cli_trust.detect_arch()
     if not arch:
         print(f"Unsupported architecture: {platform.machine()}", file=sys.stderr)
@@ -89,14 +90,10 @@ def setup_bundle():
 
     url = f"https://github.com/cryptomator/cli/releases/download/{VERSION}/cryptomator-cli-{VERSION}-linux-{arch}.zip"
 
-    plugin_dir = Path(__file__).resolve().parent
-    vendor_dir = plugin_dir / "vendor"
-    vendor_dir.mkdir(parents=True, exist_ok=True)
-    target_dir = vendor_dir / "cryptomator-cli"
-
-    # Download and extract outside the plugin's own (watched) directory tree -- see
-    # cli_trust.install_staging_root() for why. vendor_dir is only ever touched by the
-    # single publish move below, once everything has already been verified.
+    # Both of these live outside the plugin's own (watched) directory tree -- see
+    # cli_trust.bundle_install_root() and install_staging_root() for why: installing
+    # the CLI must never itself be able to trigger a plugin reload.
+    target_dir = cli_trust.bundle_install_root()
     staging_root = cli_trust.install_staging_root()
 
     print(f"Downloading cryptomator-cli {VERSION} from {url}...")
@@ -167,13 +164,12 @@ def setup_bundle():
 
         # Publish atomically: swap the verified staged tree into place with a single
         # rename, so a reader only ever sees either no bundle, the previous verified
-        # bundle, or the new verified bundle -- never a partially-extracted one, and so
-        # the watched plugin tree sees exactly one filesystem change instead of a
-        # storm of them from a file-by-file copy. (Renaming a directory needs write
-        # permission on the directory itself, not just its parent, so this must happen
-        # before the read-only lockdown below.) shutil.move uses a plain rename when
-        # staging_root and vendor_dir share a filesystem (the common case, since both
-        # are normally under $HOME) and only falls back to a file-by-file copy if not.
+        # bundle, or the new verified bundle -- never a partially-extracted one.
+        # (Renaming a directory needs write permission on the directory itself, not
+        # just its parent, so this must happen before the read-only lockdown below.)
+        # shutil.move uses a plain rename when staging_root and target_dir share a
+        # filesystem (the common case, since both are normally under $HOME) and only
+        # falls back to a file-by-file copy if not.
         if target_dir.exists():
             cli_trust.make_tree_writable(target_dir)
             shutil.rmtree(target_dir)

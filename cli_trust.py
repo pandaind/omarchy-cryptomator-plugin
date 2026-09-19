@@ -46,7 +46,7 @@ TRUSTED_CLI_BINARY_SHA256 = {
 # SHA-256 over a manifest of every file's relative path and content-hash in the
 # extracted, post-setup bundle tree (see bundle_manifest_sha256). This covers the
 # supporting jars and config file, not just the launcher binary, so swapping any
-# single file inside vendor/cryptomator-cli/ is detected before a password is sent.
+# single file inside the installed bundle is detected before a password is sent.
 TRUSTED_BUNDLE_MANIFEST_SHA256 = {
     "x64": "65fc6eccce543b552fc0438ee354b15544fbf08b77c816298e144627959037a2",
     "aarch64": "dc72ba8e41197a84d4a1522b51c1f5e1aa48cd870888d78def04dfc9d02b3738",
@@ -279,23 +279,41 @@ def run_dir_root() -> Path:
 
 def install_staging_root() -> Path:
     """Base directory for downloading and staging a new cryptomator-cli bundle before
-    it's published into vendor/cryptomator-cli/ (see setup_bundle in bundle_installer.py).
+    it's published into bundle_install_root() (see setup_bundle in bundle_installer.py).
 
-    Deliberately outside the plugin's own directory tree, for the same reason as
-    run_dir_root(): Omarchy's shell watches locally-linked plugin directories and
-    reloads the whole plugin -- tearing down the in-flight install Process (and the
-    panel) along with it -- the instant any file under them changes. Downloading and
-    extracting a bundle's hundreds of files directly into vendor/ triggers exactly that
-    storm. Unlike run_dir_root() (XDG_RUNTIME_DIR, a tmpfs that's commonly a different
-    filesystem from the plugin's own), this lives under the user's cache directory,
-    which is normally on the same filesystem as the plugin -- letting the final publish
-    step move the verified result into place with a single rename instead of a
-    file-by-file copy into the watched tree.
+    Keeps the download and extraction -- hundreds of files -- off to the side in a
+    private, ordinary cache directory while they're verified, so a crash or a bad
+    download never leaves anything half-written at the installed location. Uses the
+    user's cache directory (rather than XDG_RUNTIME_DIR, a tmpfs that's commonly a
+    different filesystem) so it's normally on the same filesystem as
+    bundle_install_root(), letting the final publish step move the verified result
+    into place with a single rename instead of a file-by-file copy.
     """
     cache_dir = os.environ.get("XDG_CACHE_HOME")
     base = Path(cache_dir) if cache_dir else Path.home() / ".cache"
     root = base / "omarchy-cryptomator-plugin" / "install-staging"
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return root
+
+
+def bundle_install_root() -> Path:
+    """Where the verified cryptomator-cli bundle is installed (see setup_bundle in
+    bundle_installer.py) and where the trust checks below look for it.
+
+    This used to be vendor/cryptomator-cli/ inside the plugin's own directory tree.
+    That meant setup_bundle()'s one unavoidable write under the watched tree -- moving
+    the verified result into its final home -- still triggered a plugin reload right as
+    the install finished, tearing the panel down mid-response and making a successful
+    install look like it needed a second click to "take". vaults.json hit the identical
+    problem for the same reason and was moved to XDG_DATA_HOME for it (see
+    vault_registry.get_vaults_file); the bundle now lives next to it, for the same
+    reason: nothing under here is ever watched, so installing it can never itself
+    trigger a reload.
+    """
+    data_dir = os.environ.get("XDG_DATA_HOME")
+    base = Path(data_dir) if data_dir else Path.home() / ".local" / "share"
+    root = base / "omarchy-cryptomator-plugin" / "cryptomator-cli"
+    root.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     return root
 
 
@@ -319,20 +337,14 @@ def sweep_stale_run_dirs(base_dir: Path, max_age_seconds: float = RUN_DIR_STALE_
         shutil.rmtree(d, ignore_errors=True)
 
 
-def _plugin_dir() -> Path:
-    return Path(__file__).resolve().parent
-
-
 def find_cryptomator_cli():
     """Locate cryptomator-cli for non-password operations (status, lock, reveal).
 
-    Checks bundled vendor/, PATH, and ~/.local/bin, in that order.
+    Checks the installed verified bundle, PATH, and ~/.local/bin, in that order.
     Do NOT use this for password-bearing operations — use open_trusted_cli_for_exec().
     """
-    plugin_dir = _plugin_dir()
-
-    # 1. Bundled inside the plugin directory (integrity-verified on setup)
-    bundled = plugin_dir / "vendor" / "cryptomator-cli" / "bin" / "cryptomator-cli"
+    # 1. The installed, integrity-verified bundle (see bundle_install_root)
+    bundled = bundle_install_root() / "bin" / "cryptomator-cli"
     if bundled.is_file() and os.access(bundled, os.X_OK):
         return str(bundled)
 
@@ -353,14 +365,14 @@ def open_trusted_cli_for_exec():
     """Verify the bundled cryptomator-cli's full identity and open its launcher via a
     verified file descriptor, for password-bearing operations ONLY.
 
-    Hashing the shared vendor/cryptomator-cli/ tree and then executing the launcher out
-    of that same, long-lived, user-writable path would still leave a window open: the
+    Hashing the shared installed bundle tree and then executing the launcher out of
+    that same, long-lived, user-writable path would still leave a window open: the
     launcher's JVM loads its jars, native libraries, and config by path over the whole
     time it runs, not just at the instant this function checks, so a same-uid attacker
     could swap a dependency in right after the check and have it loaded. To close that,
     this copies the verified bundle into a private, freshly-created snapshot directory,
     verifies *that copy's* bytes against the pinned manifest digest, locks it read-only,
-    and only ever hands back a path inside the snapshot -- never the shared vendor/
+    and only ever hands back a path inside the snapshot -- never the shared installed
     tree. Whatever this process (and the launcher it starts) ends up reading was written
     and checked by us, not by whatever happened to be sitting at a predictable path.
 
@@ -373,7 +385,7 @@ def open_trusted_cli_for_exec():
     launched process keeps reading from it for as long as it runs -- schedule its
     removal with schedule_run_dir_cleanup() instead.
     """
-    bundle_root = _plugin_dir() / "vendor" / "cryptomator-cli"
+    bundle_root = bundle_install_root()
 
     arch = detect_arch()
     if not arch or arch not in TRUSTED_BUNDLE_MANIFEST_SHA256:

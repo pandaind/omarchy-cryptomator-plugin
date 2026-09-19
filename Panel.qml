@@ -202,6 +202,12 @@ Panel {
                 spacing: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
                 Button {
+                  visible: !cryptomator.isBundled
+                  text: cryptomator.settingUpBundle ? "Downloading..." : "Setup CLI"
+                  iconText: "󰉍"; bordered: true; enabled: !cryptomator.settingUpBundle
+                  onClicked: cryptomator.setupBundle()
+                }
+                Button {
                   visible: cryptomator.installed && cryptomator.unlockedCount > 0
                   text: "Lock All"; iconText: "󰌾"; bordered: true
                   onClicked: cryptomator.lockAll()
@@ -247,14 +253,9 @@ Panel {
                 Text {
                   textFormat: Text.PlainText; width: parent.width; wrapMode: Text.WordWrap
                   text: cryptomator.installed
-                    ? "Vault unlocking only trusts this plugin's own verified CLI bundle, even though Cryptomator is already installed on your system. Install it below to unlock vaults."
-                    : "Download the official headless CLI bundle — no desktop app required."
+                    ? "Vault unlocking only trusts this plugin's own verified CLI bundle, even though Cryptomator is already installed on your system. Use Setup CLI above to unlock vaults."
+                    : "Download the official headless CLI bundle — no desktop app required. Use Setup CLI above."
                   font.family: root.fontFamily; font.pixelSize: Style.font.caption; color: root.dim
-                }
-                Button {
-                  text: cryptomator.settingUpBundle ? "Downloading..." : "Download Bundled CLI"
-                  iconText: "󰉍"; bordered: true; accent: Color.accent
-                  enabled: !cryptomator.settingUpBundle; onClicked: cryptomator.setupBundle()
                 }
               }
             }
